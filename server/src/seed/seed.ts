@@ -13,12 +13,12 @@
  */
 
 import "dotenv/config";
-import fs from "fs";
-import path from "path";
+import { existsSync, readFileSync } from "fs";
+import { resolve } from "path";
 import { prisma } from "../lib/prisma";
 import { hashPassword } from "../lib/password";
 
-const SEED_DIR = path.resolve(__dirname, "../../seed");
+const SEED_DIR = resolve(__dirname, "../../seed");
 
 // ── Specialty pool ────────────────────────────────────────────────────────────
 const SPECIALTY_POOL = ["TRAUMA", "CARDIAC", "PEDIATRIC", "NEURO", "BURNS", "ORTHO"];
@@ -48,10 +48,10 @@ const FALLBACK_SIGNALS = [
 ];
 
 function loadJson<T>(filename: string): T[] {
-  const file = path.join(SEED_DIR, filename);
-  if (!fs.existsSync(file)) return [];
+  const file = resolve(SEED_DIR, filename);
+  if (!existsSync(file)) return [];
   try {
-    return JSON.parse(fs.readFileSync(file, "utf-8")) as T[];
+    return JSON.parse(readFileSync(file, "utf-8")) as T[];
   } catch {
     console.warn(`[seed] Warning: could not parse ${filename}`);
     return [];

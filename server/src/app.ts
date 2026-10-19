@@ -30,7 +30,7 @@ export function createApp() {
   app.use("/police", policeRouter);
 
   // ─── 404 handler ─────────────────────────────────────────────────────────────
-  app.use((_req, res) => {
+  app.use((_req: express.Request, res: express.Response) => {
     res.status(404).json({ error: "Not found" });
   });
 

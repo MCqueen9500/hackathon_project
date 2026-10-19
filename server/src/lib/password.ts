@@ -1,4 +1,4 @@
-import bcrypt from "bcryptjs";
+import * as bcrypt from "bcryptjs";
 
 /** Cost factor ≥ 10 per spec section 12 */
 const SALT_ROUNDS = 10;

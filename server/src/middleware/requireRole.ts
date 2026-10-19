@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
-import type { Role } from "../types";
+import type { Role, AuthenticatedRequest } from "../types";
 
 /**
  * Role-based access middleware factory.
@@ -10,12 +10,15 @@ import type { Role } from "../types";
  */
 export function requireRole(...roles: Role[]) {
   return (req: Request, res: Response, next: NextFunction): void => {
-    if (!req.user) {
+    // After `authenticate`, req.user is always set; cast to access it safely.
+    const authReq = req as AuthenticatedRequest;
+
+    if (!authReq.user) {
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
 
-    if (!roles.includes(req.user.role as Role)) {
+    if (!roles.includes(authReq.user.role as Role)) {
       res.status(403).json({
         error: `Forbidden: requires role ${roles.join(" or ")}`,
       });

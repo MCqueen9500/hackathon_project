@@ -12,12 +12,12 @@
  */
 
 import "dotenv/config";
-import fs from "fs";
-import path from "path";
+import { writeFileSync, mkdirSync, existsSync } from "fs";
+import { resolve, join } from "path";
 import { env } from "../config/env";
 
 const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
-const SEED_DIR = path.resolve(__dirname, "../../seed");
+const SEED_DIR = resolve(__dirname, "../../seed");
 
 async function overpassQuery(query: string): Promise<{ elements: OverpassElement[] }> {
   const body = `data=${encodeURIComponent(query)}`;
@@ -59,7 +59,7 @@ interface SeedSignal {
 }
 
 async function main() {
-  fs.mkdirSync(SEED_DIR, { recursive: true });
+  mkdirSync(SEED_DIR, { recursive: true });
 
   const { DEMO_CENTER_LAT: lat, DEMO_CENTER_LNG: lng, DEMO_RADIUS_KM: radiusKm } = env;
   const radiusM = radiusKm * 1000;
@@ -97,8 +97,8 @@ out center;
     .filter((h): h is SeedHospital => h !== null);
 
   console.log(`[seed:fetch] Found ${hospitals.length} hospitals`);
-  fs.writeFileSync(
-    path.join(SEED_DIR, "hospitals.json"),
+  writeFileSync(
+    join(SEED_DIR, "hospitals.json"),
     JSON.stringify(hospitals, null, 2)
   );
 
@@ -118,8 +118,8 @@ out;
   }));
 
   console.log(`[seed:fetch] Found ${signals.length} traffic signals`);
-  fs.writeFileSync(
-    path.join(SEED_DIR, "signals.json"),
+  writeFileSync(
+    join(SEED_DIR, "signals.json"),
     JSON.stringify(signals, null, 2)
   );
 

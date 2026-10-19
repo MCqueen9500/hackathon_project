@@ -1,4 +1,4 @@
-import http from "http";
+import { createServer } from "http";
 import { Server as SocketIOServer } from "socket.io";
 import { createApp } from "./app";
 import { env } from "./config/env";
@@ -6,7 +6,7 @@ import { prisma } from "./lib/prisma";
 
 async function main() {
   const app = createApp();
-  const httpServer = http.createServer(app);
+  const httpServer = createServer(app);
 
   // ─── Socket.IO ───────────────────────────────────────────────────────────────
   // Full Socket.IO setup (auth, rooms, events) will be wired in Phase 1.
