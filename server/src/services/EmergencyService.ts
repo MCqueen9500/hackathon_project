@@ -26,6 +26,7 @@ import { prisma } from "../lib/prisma";
 import { EmergencyError } from "../errors/EmergencyError";
 import type { RankingProvider, RankedHospital } from "./ranking/RankingProvider";
 import { env } from "../config/env";
+import { emitEmergencyEvent } from "../lib/socket";
 
 // ── Terminal states allow no further transitions ──────────────────────────────
 const TERMINAL: EmergencyStatus[] = [
@@ -113,6 +114,13 @@ export class EmergencyService {
       rankedCount: ranked.length,
     });
 
+    emitEmergencyEvent("emergency:created", {
+      emergencyId: emergency.id,
+      driverId: emergency.driverId,
+      selectedHospitalId: emergency.selectedHospitalId,
+      data: { emergency },
+    });
+
     return emergency;
   }
 
@@ -134,7 +142,10 @@ export class EmergencyService {
       data: { policeStatus: "APPROVED", policeDeadline: null, status: newStatus },
     });
 
-    await this.audit("POLICE_APPROVED", emergencyId, actorId, { newStatus });
+    await this.audit("POLICE_APPROVED", emergencyId, actorId, { newStatus }, {
+      driverId: em.driverId,
+      selectedHospitalId: updated.selectedHospitalId,
+    });
     return updated;
   }
 
@@ -154,7 +165,10 @@ export class EmergencyService {
       data: { policeStatus: "REJECTED", status: "REJECTED", closedAt: new Date() },
     });
 
-    await this.audit("POLICE_REJECTED", emergencyId, actorId);
+    await this.audit("POLICE_REJECTED", emergencyId, actorId, undefined, {
+      driverId: updated.driverId,
+      selectedHospitalId: updated.selectedHospitalId,
+    });
     return updated;
   }
 
@@ -217,6 +231,9 @@ export class EmergencyService {
     await this.audit("HOSPITAL_APPROVED", emergencyId, actorId, {
       hospitalId: callerHospitalId,
       newStatus,
+    }, {
+      driverId: em.driverId,
+      selectedHospitalId: callerHospitalId,
     });
     return updated;
   }
@@ -247,6 +264,9 @@ export class EmergencyService {
 
     await this.audit("HOSPITAL_REJECTED", emergencyId, actorId, {
       hospitalId: callerHospitalId,
+    }, {
+      driverId: em.driverId,
+      selectedHospitalId: em.selectedHospitalId,
     });
 
     return this.assignNextHospital(emergencyId);
@@ -281,6 +301,9 @@ export class EmergencyService {
 
     await this.audit("HOSPITAL_REVOKED", emergencyId, actorId, {
       hospitalId: callerHospitalId,
+    }, {
+      driverId: em.driverId,
+      selectedHospitalId: em.selectedHospitalId,
     });
 
     return this.assignNextHospital(emergencyId);
@@ -306,7 +329,10 @@ export class EmergencyService {
       data: { status: "CANCELLED", closedAt: new Date() },
     });
 
-    await this.audit("EMERGENCY_CANCELLED", emergencyId, actorId);
+    await this.audit("EMERGENCY_CANCELLED", emergencyId, actorId, undefined, {
+      driverId: em.driverId,
+      selectedHospitalId: em.selectedHospitalId,
+    });
     return updated;
   }
 
@@ -326,7 +352,10 @@ export class EmergencyService {
       data: { status: "CONSUMED" },
     });
 
-    await this.audit("AMBULANCE_ARRIVED", emergencyId, actorId);
+    await this.audit("AMBULANCE_ARRIVED", emergencyId, actorId, undefined, {
+      driverId: updated.driverId,
+      selectedHospitalId: updated.selectedHospitalId,
+    });
     return updated;
   }
 
@@ -359,6 +388,9 @@ export class EmergencyService {
 
     await this.audit("HANDOVER_CONFIRMED", emergencyId, actorId, {
       hospitalId: callerHospitalId,
+    }, {
+      driverId: updated.driverId,
+      selectedHospitalId: updated.selectedHospitalId,
     });
     return updated;
   }
@@ -385,6 +417,9 @@ export class EmergencyService {
     await this.audit("HOSPITAL_TIMED_OUT", emergencyId, null, {
       hospitalId: em.selectedHospitalId,
       attempt: em.hospitalAttempt,
+    }, {
+      driverId: em.driverId,
+      selectedHospitalId: em.selectedHospitalId,
     });
 
     return this.assignNextHospital(emergencyId);
@@ -405,6 +440,9 @@ export class EmergencyService {
       });
       await this.audit("EMERGENCY_EXPIRED", emergencyId, null, {
         exhaustedAttempts: nextAttempt,
+      }, {
+        driverId: em.driverId,
+        selectedHospitalId: em.selectedHospitalId,
       });
       return expired;
     }
@@ -429,6 +467,9 @@ export class EmergencyService {
     await this.audit("HOSPITAL_REASSIGNED", emergencyId, null, {
       attempt:    nextAttempt,
       hospitalId: next.hospitalId,
+    }, {
+      driverId: em.driverId,
+      selectedHospitalId: next.hospitalId,
     });
 
     return updated;
@@ -530,7 +571,8 @@ export class EmergencyService {
     action: string,
     entityId: string,
     actorId: string | null,
-    payload?: Record<string, unknown>
+    payload?: Record<string, unknown>,
+    emitCtx?: { driverId: string; selectedHospitalId: string | null }
   ): Promise<void> {
     await prisma.auditLog.create({
       data: {
@@ -541,5 +583,16 @@ export class EmergencyService {
         payload: payload !== undefined ? (payload as Prisma.InputJsonValue) : Prisma.JsonNull,
       },
     });
+
+    // Emit socket event on every transition (spec rule 8).
+    // The caller passes the emergency context so we avoid an extra DB round-trip.
+    if (action !== "EMERGENCY_CREATED" && emitCtx) {
+      emitEmergencyEvent("emergency:updated", {
+        emergencyId: entityId,
+        driverId: emitCtx.driverId,
+        selectedHospitalId: emitCtx.selectedHospitalId,
+        data: { emergencyId: entityId, action, payload },
+      });
+    }
   }
 }

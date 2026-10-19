@@ -1,34 +1,135 @@
-import { Router } from "express";
+/**
+ * routes/police/index.ts
+ *
+ * Police endpoints (spec section 8):
+ *   GET  /police/queue
+ *   POST /police/emergencies/:id/verify
+ *   POST /police/emergencies/:id/reject
+ *   POST /closures          (stub — skipped per prompt)
+ *   DELETE /closures/:id    (stub)
+ *   GET  /closures          (stub)
+ */
+
+import { Router, Request, Response } from "express";
+import { z } from "zod";
+import { prisma } from "../../lib/prisma";
 import { authenticate } from "../../middleware/authenticate";
 import { requireRole } from "../../middleware/requireRole";
+import { emergencyService } from "../../services/instances";
+import { EmergencyError } from "../../errors/EmergencyError";
+import type { AuthenticatedRequest } from "../../types";
 
 export const policeRouter = Router();
 
-// ─── All police routes require POLICE role ────────────────────────────────────
 const guardPolice = [authenticate, requireRole("POLICE")];
 
-// ─── Stub routes (Phase 2 implementation) ────────────────────────────────────
-// These stubs exist so RBAC tests can prove a DRIVER / HOSPITAL_ADMIN gets 403.
-policeRouter.get("/queue", ...guardPolice, (_req, res) => {
-  res.status(501).json({ message: "Not implemented yet (Phase 2)" });
+const p = (v: string | string[]): string => (Array.isArray(v) ? v[0] : v);
+
+// ── GET /police/queue ─────────────────────────────────────────────────────────
+// Returns all PENDING_APPROVALS emergencies, escalated first, then oldest-first
+policeRouter.get(
+  "/queue",
+  ...guardPolice,
+  async (_req: Request, res: Response): Promise<void> => {
+    const emergencies = await prisma.emergency.findMany({
+      where: { status: "PENDING_APPROVALS", policeStatus: "PENDING" },
+      orderBy: [
+        { policeEscalated: "desc" },   // escalated to the top
+        { createdAt: "asc" },          // oldest first within tier
+      ],
+      include: {
+        driver: {
+          select: { id: true, name: true, username: true, ambulanceNo: true },
+        },
+      },
+    });
+
+    res.json({ queue: emergencies });
+  }
+);
+
+// ── POST /police/emergencies/:id/verify ───────────────────────────────────────
+policeRouter.post(
+  "/emergencies/:id/verify",
+  ...guardPolice,
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    try {
+      const emergency = await emergencyService.policeApprove(p(req.params.id), authReq.user.sub);
+      res.json({ emergency });
+    } catch (err) {
+      if (err instanceof EmergencyError) {
+        const status = err.code === "EMERGENCY_NOT_FOUND" ? 404 : 409;
+        res.status(status).json({ error: err.message, code: err.code });
+      } else { throw err; }
+    }
+  }
+);
+
+// ── POST /police/emergencies/:id/reject ───────────────────────────────────────
+policeRouter.post(
+  "/emergencies/:id/reject",
+  ...guardPolice,
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    try {
+      const emergency = await emergencyService.policeReject(p(req.params.id), authReq.user.sub);
+      res.json({ emergency });
+    } catch (err) {
+      if (err instanceof EmergencyError) {
+        const status = err.code === "EMERGENCY_NOT_FOUND" ? 404 : 409;
+        res.status(status).json({ error: err.message, code: err.code });
+      } else { throw err; }
+    }
+  }
+);
+
+// ── Road closures (stubs — routing/closures are Phase 3) ─────────────────────
+const closureBodySchema = z.object({
+  polygonGeoJson: z.string().min(1),
 });
 
-policeRouter.post("/emergencies/:id/verify", ...guardPolice, (_req, res) => {
-  res.status(501).json({ message: "Not implemented yet (Phase 2)" });
-});
+policeRouter.post(
+  "/closures",
+  ...guardPolice,
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const parsed = closureBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Validation error", details: parsed.error.flatten() });
+      return;
+    }
+    const closure = await prisma.roadClosure.create({
+      data: {
+        polygonGeoJson: parsed.data.polygonGeoJson,
+        createdById:    authReq.user.sub,
+        active:         true,
+      },
+    });
+    res.status(201).json({ closure });
+  }
+);
 
-policeRouter.post("/emergencies/:id/reject", ...guardPolice, (_req, res) => {
-  res.status(501).json({ message: "Not implemented yet (Phase 2)" });
-});
+policeRouter.delete(
+  "/closures/:id",
+  ...guardPolice,
+  async (req: Request, res: Response): Promise<void> => {
+    const closure = await prisma.roadClosure.findUnique({ where: { id: p(req.params.id) } });
+    if (!closure) { res.status(404).json({ error: "Closure not found" }); return; }
 
-policeRouter.post("/closures", ...guardPolice, (_req, res) => {
-  res.status(501).json({ message: "Not implemented yet (Phase 2)" });
-});
+    await prisma.roadClosure.update({ where: { id: p(req.params.id) }, data: { active: false } });
+    res.json({ ok: true });
+  }
+);
 
-policeRouter.delete("/closures/:id", ...guardPolice, (_req, res) => {
-  res.status(501).json({ message: "Not implemented yet (Phase 2)" });
-});
-
-policeRouter.get("/closures", ...guardPolice, (_req, res) => {
-  res.status(501).json({ message: "Not implemented yet (Phase 2)" });
-});
+policeRouter.get(
+  "/closures",
+  ...guardPolice,
+  async (_req: Request, res: Response): Promise<void> => {
+    const closures = await prisma.roadClosure.findMany({
+      where: { active: true },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json({ closures });
+  }
+);

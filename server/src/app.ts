@@ -6,6 +6,7 @@ import { healthRouter } from "./routes/health";
 import { authRouter } from "./routes/auth";
 import { hospitalRouter } from "./routes/hospital/index";
 import { policeRouter } from "./routes/police/index";
+import { driverRouter } from "./routes/driver/index";
 
 export function createApp() {
   const app = express();
@@ -29,6 +30,9 @@ export function createApp() {
   app.use("/hospital", hospitalRouter);
   app.use("/police", policeRouter);
 
+  // Driver routes live at root (mix of /hospitals and /emergencies paths per spec 8)
+  app.use("/", driverRouter);
+
   // ─── 404 handler ─────────────────────────────────────────────────────────────
   app.use((_req: express.Request, res: express.Response) => {
     res.status(404).json({ error: "Not found" });
@@ -42,6 +46,11 @@ export function createApp() {
       res: express.Response,
       _next: express.NextFunction
     ) => {
+      // Multer errors (file type / size)
+      if (err.message?.startsWith("Only image files") || err.message?.includes("File too large")) {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       console.error("[ERROR]", err.message, err.stack);
       res.status(500).json({ error: "Internal server error" });
     }
