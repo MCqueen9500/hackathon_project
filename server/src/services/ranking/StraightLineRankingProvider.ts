@@ -7,7 +7,7 @@ import type {
 const EARTH_RADIUS_M = 6_371_000;
 /**
  * Assumed average city ambulance speed: 36 km/h ≈ 10 m/s.
- * Phase 3 will replace this with real ORS routing ETAs.
+ * Phase 3 replaces this with real ORS routing ETAs.
  */
 const AVG_SPEED_MS = 10;
 
@@ -34,7 +34,7 @@ export function haversineMeters(
 
 /**
  * Phase-1 ranking: sort by haversine distance, exclude hospitals with no beds.
- * Implements the RankingProvider interface so it can be swapped in Phase 3.
+ * Implements the RankingProvider interface — used in tests and as ultimate fallback.
  */
 export class StraightLineRankingProvider implements RankingProvider {
   async rank(
@@ -55,5 +55,27 @@ export class StraightLineRankingProvider implements RankingProvider {
         };
       })
       .sort((a, b) => a.distanceMeters - b.distanceMeters);
+  }
+
+  async fetchRoute(
+    originLat: number,
+    originLng: number,
+    destLat: number,
+    destLng: number
+  ): Promise<{ distanceMeters: number; etaSeconds: number; routeGeoJson: unknown }> {
+    const distanceMeters = Math.round(
+      haversineMeters(originLat, originLng, destLat, destLng)
+    );
+    return {
+      distanceMeters,
+      etaSeconds: Math.round(distanceMeters / AVG_SPEED_MS),
+      routeGeoJson: {
+        type: "LineString",
+        coordinates: [
+          [originLng, originLat],
+          [destLng, destLat],
+        ],
+      },
+    };
   }
 }

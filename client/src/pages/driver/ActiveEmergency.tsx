@@ -4,6 +4,8 @@
  */
 
 import type { Emergency } from "../../types/emergency";
+import { MapLibreMap } from "../../components/MapLibreMap";
+
 
 interface Props {
   emergency: Emergency;
@@ -70,13 +72,26 @@ export function ActiveEmergency({ emergency: em, onCancel, onArrived, busy }: Pr
         </div>
       </div>
 
-      {/* Map placeholder */}
-      <div className="bg-gray-900 border border-gray-800 rounded-2xl h-48 flex items-center justify-center">
-        <div className="text-center text-gray-600">
-          <p className="text-3xl mb-2">🗺️</p>
-          <p className="text-sm">Map + route coming in Phase 5</p>
+      {/* Map — route + ambulance marker */}
+      {em.originLat && em.originLng ? (
+        <MapLibreMap
+          key={`${em.id}-${em.selectedHospitalId}`}
+          originLat={em.originLat}
+          originLng={em.originLng}
+          destLat={em.selectedHospital?.lat}
+          destLng={em.selectedHospital?.lng}
+          routeGeoJson={em.routeGeoJson}
+          ambulanceMarker
+          className="h-52 w-full border border-gray-800"
+        />
+      ) : (
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl h-52 flex items-center justify-center">
+          <div className="text-center text-gray-600">
+            <p className="text-3xl mb-2">🗺️</p>
+            <p className="text-sm">Waiting for location…</p>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Status timeline */}
       <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5">

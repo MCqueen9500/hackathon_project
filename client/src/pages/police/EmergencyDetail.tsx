@@ -3,6 +3,8 @@
  */
 
 import type { PoliceQueueItem } from "../../types/emergency";
+import { MapLibreMap } from "../../components/MapLibreMap";
+
 
 interface Props {
   emergency: PoliceQueueItem;
@@ -83,14 +85,12 @@ export function EmergencyDetail({ emergency: em, busy, onVerify, onReject, onBac
         </div>
       </div>
 
-      {/* Location map placeholder */}
-      <div className="bg-gray-900 border border-gray-800 rounded-2xl h-36 flex items-center justify-center">
-        <div className="text-center text-gray-600">
-          <p className="text-2xl mb-1">📍</p>
-          <p className="text-xs">{em.originLat.toFixed(5)}, {em.originLng.toFixed(5)}</p>
-          <p className="text-xs mt-1">Map coming in Phase 5</p>
-        </div>
-      </div>
+      {/* Location map */}
+      <MapLibreMap
+        originLat={em.originLat}
+        originLng={em.originLng}
+        className="h-40 w-full border border-gray-800"
+      />
 
       {/* Note */}
       {em.note && (

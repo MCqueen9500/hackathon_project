@@ -67,7 +67,7 @@ export class EmergencyService {
     });
     if (existing) return existing;
 
-    // Rank all hospitals by proximity, excluding those with no beds
+    // Rank all hospitals by routed ETA, excluding those with no beds
     const hospitals = await prisma.hospital.findMany({
       select: { id: true, lat: true, lng: true, availableBeds: true },
     });
@@ -80,31 +80,39 @@ export class EmergencyService {
       );
     }
 
+    // Fetch full route GeoJSON for the selected (top-ranked) hospital
+    const selectedHospital = hospitals.find((h) => h.id === ranked[0].hospitalId)!;
+    const route = await this.ranking.fetchRoute(
+      dto.originLat, dto.originLng,
+      selectedHospital.lat, selectedHospital.lng
+    );
+
     const now = Date.now();
     const hospitalDeadline = new Date(now + env.HOSPITAL_APPROVAL_TIMEOUT_SEC * 1_000);
     const policeDeadline   = new Date(now + env.POLICE_APPROVAL_TIMEOUT_SEC   * 1_000);
 
     const emergency = await prisma.emergency.create({
       data: {
-        driverId:          dto.driverId,
-        severity:          dto.severity,
-        originLat:         dto.originLat,
-        originLng:         dto.originLng,
-        photoPath:         dto.photoPath,
-        note:              dto.note,
-        idempotencyKey:    dto.idempotencyKey,
-        city:              dto.city,
-        status:            "PENDING_APPROVALS",
-        policeStatus:      "PENDING",
-        hospitalStatus:    "PENDING",
+        driverId:           dto.driverId,
+        severity:           dto.severity,
+        originLat:          dto.originLat,
+        originLng:          dto.originLng,
+        photoPath:          dto.photoPath,
+        note:               dto.note,
+        idempotencyKey:     dto.idempotencyKey,
+        city:               dto.city,
+        status:             "PENDING_APPROVALS",
+        policeStatus:       "PENDING",
+        hospitalStatus:     "PENDING",
         policeDeadline,
         hospitalDeadline,
-        policeEscalated:   false,
+        policeEscalated:    false,
         selectedHospitalId: ranked[0].hospitalId,
-        hospitalAttempt:   0,
-        rankedHospitals:   ranked as unknown as Prisma.InputJsonValue,
-        etaSeconds:        ranked[0].etaSeconds,
-        distanceMeters:    ranked[0].distanceMeters,
+        hospitalAttempt:    0,
+        rankedHospitals:    ranked as unknown as Prisma.InputJsonValue,
+        routeGeoJson:       route.routeGeoJson as Prisma.InputJsonValue,
+        etaSeconds:         route.etaSeconds,
+        distanceMeters:     route.distanceMeters,
       },
     });
 
@@ -112,6 +120,7 @@ export class EmergencyService {
       severity: dto.severity,
       selectedHospitalId: ranked[0].hospitalId,
       rankedCount: ranked.length,
+      routeSource: "routed",
     });
 
     emitEmergencyEvent("emergency:created", {
@@ -452,6 +461,23 @@ export class EmergencyService {
       Date.now() + env.HOSPITAL_APPROVAL_TIMEOUT_SEC * 1_000
     );
 
+    // Fetch updated route GeoJSON for the newly selected hospital
+    const nextHospital = await prisma.hospital.findUnique({
+      where: { id: next.hospitalId },
+      select: { lat: true, lng: true },
+    });
+    let routeData = { distanceMeters: next.distanceMeters, etaSeconds: next.etaSeconds, routeGeoJson: null as unknown };
+    if (nextHospital) {
+      try {
+        routeData = await this.ranking.fetchRoute(
+          em.originLat, em.originLng,
+          nextHospital.lat, nextHospital.lng
+        );
+      } catch {
+        // keep ranked estimates if route fetch fails
+      }
+    }
+
     const updated = await prisma.emergency.update({
       where: { id: emergencyId },
       data: {
@@ -459,8 +485,9 @@ export class EmergencyService {
         hospitalAttempt:    nextAttempt,
         hospitalStatus:     "PENDING",
         hospitalDeadline,
-        etaSeconds:         next.etaSeconds,
-        distanceMeters:     next.distanceMeters,
+        routeGeoJson:       routeData.routeGeoJson as Prisma.InputJsonValue,
+        etaSeconds:         routeData.etaSeconds,
+        distanceMeters:     routeData.distanceMeters,
       },
     });
 

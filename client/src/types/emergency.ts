@@ -28,6 +28,7 @@ export interface Hospital {
 export interface HospitalCandidate extends Hospital {
   etaSeconds: number;
   distanceMeters: number;
+  // lat/lng inherited from Hospital
 }
 
 export interface Emergency {

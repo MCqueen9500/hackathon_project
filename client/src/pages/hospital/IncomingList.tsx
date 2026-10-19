@@ -5,6 +5,8 @@
 
 import { useState, useEffect } from "react";
 import type { Emergency } from "../../types/emergency";
+import { MapLibreMap } from "../../components/MapLibreMap";
+
 
 interface Props {
   items: Emergency[];
@@ -86,9 +88,15 @@ export function IncomingList({
               {mode === "incoming" && <EtaCountdown deadline={em.hospitalDeadline} />}
             </div>
 
-            {/* Map placeholder */}
-            <div className="bg-gray-800 rounded-xl h-20 flex items-center justify-center mb-4">
-              <p className="text-xs text-gray-600">📍 {em.originLat.toFixed(4)}, {em.originLng.toFixed(4)} · Map in Phase 5</p>
+            {/* Map: origin pin + route */}
+            <div className="mb-4 rounded-xl overflow-hidden">
+              <MapLibreMap
+                key={`${em.id}-${em.selectedHospitalId}`}
+                originLat={em.originLat}
+                originLng={em.originLng}
+                routeGeoJson={em.routeGeoJson}
+                className="h-28 w-full"
+              />
             </div>
 
             {/* Note */}

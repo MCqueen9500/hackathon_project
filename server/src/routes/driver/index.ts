@@ -78,18 +78,21 @@ driverRouter.get(
       select: { id: true, name: true, lat: true, lng: true, availableBeds: true, specialties: true, city: true },
     });
 
-    // Use straight-line for candidates listing (routing happens on create)
-    const { StraightLineRankingProvider } = await import("../../services/ranking/StraightLineRankingProvider");
-    const ranking = new StraightLineRankingProvider();
+    // Use OrsRankingProvider (routed ETA, with OSRM fallback) for candidate listing
+    const { OrsRankingProvider } = await import("../../services/ranking/OrsRankingProvider");
+    const ranking = new OrsRankingProvider();
     const ranked = await ranking.rank(lat, lng, hospitals);
 
-    // Return top 5 enriched with hospital details
+    // Return top 5 enriched with hospital details, sorted by routed ETA
     const results = ranked.slice(0, 5).map((r) => {
       const h = hospitals.find((h) => h.id === r.hospitalId)!;
       return {
+        id:             r.hospitalId,
         hospitalId:     r.hospitalId,
         name:           h.name,
         city:           h.city,
+        lat:            h.lat,
+        lng:            h.lng,
         availableBeds:  h.availableBeds,
         specialties:    h.specialties,
         distanceMeters: r.distanceMeters,
@@ -100,6 +103,7 @@ driverRouter.get(
     res.json({ candidates: results });
   }
 );
+
 
 // ── POST /emergencies — create emergency with photo ───────────────────────────
 driverRouter.post(

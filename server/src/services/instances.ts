@@ -2,11 +2,11 @@
  * services/instances.ts
  *
  * Singleton service instances shared across routes, scheduler and tests.
- * Importing this file from routes gives them access to the same EmergencyService
- * instance that is wired to the ranking provider.
+ * Phase 3/10: EmergencyService is now wired to OrsRankingProvider
+ * (OpenRouteService with automatic OSRM fallback).
  */
 
 import { EmergencyService } from "./EmergencyService";
-import { StraightLineRankingProvider } from "./ranking/StraightLineRankingProvider";
+import { OrsRankingProvider } from "./ranking/OrsRankingProvider";
 
-export const emergencyService = new EmergencyService(new StraightLineRankingProvider());
+export const emergencyService = new EmergencyService(new OrsRankingProvider());

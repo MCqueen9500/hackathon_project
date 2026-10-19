@@ -11,8 +11,8 @@ const envSchema = z.object({
   JWT_ACCESS_EXPIRY: z.string().default("15m"),
   JWT_REFRESH_EXPIRY: z.string().default("7d"),
 
-  // OpenRouteService
-  ORS_API_KEY: z.string().min(1),
+  // OpenRouteService (optional — falls back to OSRM if missing/placeholder)
+  ORS_API_KEY: z.string().default(""),
 
   // Demo geography
   DEMO_CENTER_LAT: z.coerce.number(),
