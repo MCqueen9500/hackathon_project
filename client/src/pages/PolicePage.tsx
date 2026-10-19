@@ -1,68 +1,84 @@
 /**
- * /police — Police dashboard shell.
- * Feature screens (queue, closures) are added in later phases.
+ * Police dashboard — live queue + detail view.
+ * Socket drives real-time queue updates.
  */
 
+import { useState, useEffect, useCallback } from "react";
 import { AppShell } from "../components/AppShell";
 import { useSocket } from "../hooks/useSocket";
-import { useEffect } from "react";
+import { getPoliceQueue, policeVerify, policeReject } from "../api/policeApi";
+import type { PoliceQueueItem } from "../types/emergency";
+import { QueueList } from "./police/QueueList";
+import { EmergencyDetail } from "./police/EmergencyDetail";
 
 export default function PolicePage() {
-  const { connected, refetchCount } = useSocket();
+  const { socket, refetchCount } = useSocket();
 
+  const [queue,    setQueue]    = useState<PoliceQueueItem[]>([]);
+  const [selected, setSelected] = useState<PoliceQueueItem | null>(null);
+  const [busy,     setBusy]     = useState(false);
+  const [loading,  setLoading]  = useState(true);
+
+  const fetchQueue = useCallback(async () => {
+    try {
+      const q = await getPoliceQueue();
+      setQueue(q);
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchQueue(); }, [fetchQueue]);
+  useEffect(() => { if (refetchCount > 0) fetchQueue(); }, [refetchCount, fetchQueue]);
+
+  // Socket: refresh queue on any emergency event
   useEffect(() => {
-    if (refetchCount > 0) {
-      console.log("[police] Socket reconnected — refetching queue");
-    }
-  }, [refetchCount]);
+    if (!socket) return;
+    const refresh = () => fetchQueue();
+    socket.on("emergency:created",  refresh);
+    socket.on("emergency:updated",  refresh);
+    socket.on("approval:timeout",   refresh);
+    return () => {
+      socket.off("emergency:created",  refresh);
+      socket.off("emergency:updated",  refresh);
+      socket.off("approval:timeout",   refresh);
+    };
+  }, [socket, fetchQueue]);
+
+  const handleVerify = async (id: string) => {
+    setBusy(true);
+    try {
+      await policeVerify(id);
+      await fetchQueue();
+      setSelected(null);
+    } finally { setBusy(false); }
+  };
+
+  const handleReject = async (id: string) => {
+    setBusy(true);
+    try {
+      await policeReject(id);
+      await fetchQueue();
+      setSelected(null);
+    } finally { setBusy(false); }
+  };
 
   return (
     <AppShell>
-      <div className="flex flex-col gap-6">
-
-        {/* ── Header row ─────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold text-white">Police Dashboard</h1>
-            <p className="text-sm text-gray-400 mt-0.5">Emergency verification queue</p>
-          </div>
-          <span
-            className={`w-2.5 h-2.5 rounded-full ${connected ? "bg-egc-green-500 animate-pulse" : "bg-gray-600"}`}
-            title={connected ? "Live" : "Offline"}
-          />
-        </div>
-
-        {/* ── Queue placeholder ───────────────────────────────────────── */}
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-8 text-center">
-          <span className="text-4xl mb-4 block" aria-hidden>🚔</span>
-          <p className="text-white font-semibold">Verification Queue</p>
-          <p className="text-gray-500 text-sm mt-1">No pending verifications</p>
-        </div>
-
-        {/* ── Stats ──────────────────────────────────────────────────── */}
-        <div className="grid grid-cols-3 gap-3">
-          {[
-            { label: "Pending",   value: "0", color: "text-amber-400"      },
-            { label: "Escalated", value: "0", color: "text-egc-red-500"    },
-            { label: "Closures",  value: "0", color: "text-blue-400"       },
-          ].map(({ label, value, color }) => (
-            <div
-              key={label}
-              className="bg-gray-900 border border-gray-800 rounded-xl p-4 text-center"
-            >
-              <span className={`text-2xl font-bold ${color}`}>{value}</span>
-              <p className="text-xs text-gray-500 mt-1">{label}</p>
-            </div>
-          ))}
-        </div>
-
-        {/* ── Road closures placeholder ───────────────────────────────── */}
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-8 text-center">
-          <span className="text-4xl mb-4 block" aria-hidden>🚧</span>
-          <p className="text-white font-semibold">Road Closures</p>
-          <p className="text-gray-500 text-sm mt-1">No active closures — map tool coming in Phase 5</p>
-        </div>
-      </div>
+      {selected ? (
+        <EmergencyDetail
+          emergency={selected}
+          busy={busy}
+          onVerify={() => handleVerify(selected.id)}
+          onReject={() => handleReject(selected.id)}
+          onBack={() => setSelected(null)}
+        />
+      ) : (
+        <QueueList
+          queue={queue}
+          loading={loading}
+          onSelect={setSelected}
+        />
+      )}
     </AppShell>
   );
 }

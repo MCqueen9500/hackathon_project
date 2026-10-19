@@ -174,3 +174,19 @@ hospitalRouter.patch(
     res.json({ hospital });
   }
 );
+
+// ── GET /hospital/me ──────────────────────────────────────────────────────────
+hospitalRouter.get(
+  "/me",
+  ...guardHospitalAdmin,
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const { hospitalId } = authReq.user;
+    if (!hospitalId) { res.status(403).json({ error: "No hospital associated" }); return; }
+
+    const hospital = await prisma.hospital.findUnique({ where: { id: hospitalId } });
+    if (!hospital) { res.status(404).json({ error: "Hospital not found" }); return; }
+
+    res.json({ hospital });
+  }
+);
