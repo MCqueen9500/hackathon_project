@@ -16,24 +16,49 @@ import { writeFileSync, mkdirSync, existsSync } from "fs";
 import { resolve, join } from "path";
 import { env } from "../config/env";
 
-const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+const OVERPASS_ENDPOINTS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+];
+
 const SEED_DIR = resolve(__dirname, "../../seed");
+
 
 async function overpassQuery(query: string): Promise<{ elements: OverpassElement[] }> {
   const body = `data=${encodeURIComponent(query)}`;
-  const res = await fetch(OVERPASS_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-    signal: AbortSignal.timeout(90_000),
-  });
+  const headers = {
+    "Content-Type": "application/x-www-form-urlencoded",
+    "Accept":       "application/json, */*",
+    "User-Agent":   "EGC-Seed/1.0 (hackathon demo)",
+  };
 
-  if (!res.ok) {
-    throw new Error(`Overpass returned HTTP ${res.status}: ${await res.text()}`);
+  let lastErr: Error | null = null;
+
+  for (const url of OVERPASS_ENDPOINTS) {
+    try {
+      console.log(`[seed:fetch]   → trying ${url}`);
+      const res = await fetch(url, {
+        method: "POST",
+        headers,
+        body,
+        signal: AbortSignal.timeout(90_000),
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+      }
+
+      return res.json() as Promise<{ elements: OverpassElement[] }>;
+    } catch (err) {
+      lastErr = err as Error;
+      console.warn(`[seed:fetch]   ✗ ${url} failed: ${lastErr.message}`);
+    }
   }
 
-  return res.json() as Promise<{ elements: OverpassElement[] }>;
+  throw new Error(`All Overpass endpoints failed. Last error: ${lastErr?.message}`);
 }
+
 
 interface OverpassElement {
   id: number;
@@ -127,6 +152,15 @@ out;
 }
 
 main().catch((err) => {
-  console.error("[seed:fetch] ❌ Failed:", err);
+  const hospitalsExist = existsSync(join(SEED_DIR, "hospitals.json"));
+  const signalsExist   = existsSync(join(SEED_DIR, "signals.json"));
+
+  if (hospitalsExist && signalsExist) {
+    console.warn(`[seed:fetch] ⚠️  Overpass unreachable: ${err.message}`);
+    console.warn(`[seed:fetch] ✅  Using existing fallback seed files in ${SEED_DIR}`);
+    process.exit(0);
+  }
+
+  console.error("[seed:fetch] ❌ Failed and no fallback files exist:", err);
   process.exit(1);
 });
