@@ -70,18 +70,23 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser]     = useState<AuthUser | null>(loadUser);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser]       = useState<AuthUser | null>(loadUser);
+  // Only show loading spinner when we need to probe an existing refresh token.
+  // If there's no refresh token at startup, we're definitely not logged in.
+  const [loading, setLoading] = useState(() => !!localStorage.getItem(KEYS.REFRESH));
 
   // ── Restore + verify session on mount ────────────────────────────────────
   useEffect(() => {
     const refresh = localStorage.getItem(KEYS.REFRESH);
-    if (!refresh) { setLoading(false); return; }
+    if (!refresh) {
+      setUser(null);
+      setLoading(false);
+      return;
+    }
 
     api
       .post<LoginResponse>("/auth/refresh", { refreshToken: refresh })
       .then(({ data }) => {
-        // Server returned a new access token (and maybe a rotated refresh)
         localStorage.setItem(KEYS.ACCESS, data.accessToken);
         if (data.refreshToken) {
           localStorage.setItem(KEYS.REFRESH, data.refreshToken);
@@ -95,12 +100,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       })
       .catch(() => {
-        // Refresh invalid → clear and force re-login
         clearSession();
         setUser(null);
       })
       .finally(() => setLoading(false));
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // run once on mount only
+
 
   // ── Listen for forced logout from api.ts interceptor ─────────────────────
   useEffect(() => {
