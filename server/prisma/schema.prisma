@@ -1,0 +1,215 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum Role {
+  DRIVER
+  HOSPITAL_ADMIN
+  POLICE
+}
+
+enum EmergencyStatus {
+  PENDING_APPROVALS
+  ACTIVE
+  ARRIVED
+  CLOSED
+  REJECTED
+  EXPIRED
+  CANCELLED
+}
+
+enum Severity {
+  CRITICAL
+  SERIOUS
+  STABLE
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  TIMED_OUT
+}
+
+enum BedHoldStatus {
+  HELD
+  CONSUMED
+  RELEASED
+  EXPIRED
+}
+
+enum LocationSource {
+  GPS
+  SIMULATOR
+}
+
+// ─── Models ──────────────────────────────────────────────────────────────────
+
+model User {
+  id           String    @id @default(uuid())
+  name         String
+  username     String    @unique
+  passwordHash String
+  role         Role
+  hospitalId   String?
+  ambulanceNo  String?
+  active       Boolean   @default(true)
+  city         String?   // design-only: multi-city (Section 2)
+  createdAt    DateTime  @default(now())
+
+  hospital     Hospital? @relation(fields: [hospitalId], references: [id])
+
+  emergenciesAsDriver Emergency[] @relation("DriverEmergencies")
+  roadClosures        RoadClosure[]
+  auditLogs           AuditLog[]
+
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+model Hospital {
+  id                   String   @id @default(uuid())
+  name                 String
+  lat                  Float
+  lng                  Float
+  city                 String?  // design-only: multi-city (Section 2)
+  specialties          String[] // e.g. ["TRAUMA", "CARDIAC", "PEDIATRIC"]
+  totalEmergencyBeds   Int      @default(0)
+  availableBeds        Int      @default(0)
+  createdAt            DateTime @default(now())
+
+  users      User[]
+  emergencies Emergency[] @relation("SelectedHospital")
+  bedHolds    BedHold[]
+
+  @@map("hospitals")
+}
+
+model Emergency {
+  id               String          @id @default(uuid())
+  driverId         String
+  status           EmergencyStatus @default(PENDING_APPROVALS)
+  severity         Severity
+  originLat        Float
+  originLng        Float
+  photoPath        String
+  note             String?
+
+  selectedHospitalId String?
+  hospitalAttempt    Int           @default(0)
+  rankedHospitals    Json?         // array of {hospitalId, eta, distance} snapshots
+
+  policeStatus     ApprovalStatus  @default(PENDING)
+  hospitalStatus   ApprovalStatus  @default(PENDING)
+  policeDeadline   DateTime?
+  hospitalDeadline DateTime?
+  policeEscalated  Boolean         @default(false)
+
+  routeGeoJson     Json?
+  etaSeconds       Int?
+  distanceMeters   Int?
+
+  idempotencyKey   String          @unique
+  city             String?         // design-only: multi-city (Section 2)
+  createdAt        DateTime        @default(now())
+  closedAt         DateTime?
+
+  driver           User            @relation("DriverEmergencies", fields: [driverId], references: [id])
+  selectedHospital Hospital?       @relation("SelectedHospital", fields: [selectedHospitalId], references: [id])
+
+  locationPings    LocationPing[]
+  bedHolds         BedHold[]
+
+  @@map("emergencies")
+}
+
+model BedHold {
+  id          String        @id @default(uuid())
+  hospitalId  String
+  emergencyId String
+  status      BedHoldStatus @default(HELD)
+  expiresAt   DateTime
+  createdAt   DateTime      @default(now())
+
+  hospital  Hospital  @relation(fields: [hospitalId], references: [id])
+  emergency Emergency @relation(fields: [emergencyId], references: [id])
+
+  @@map("bed_holds")
+}
+
+model LocationPing {
+  id          String         @id @default(uuid())
+  emergencyId String
+  lat         Float
+  lng         Float
+  speed       Float?
+  heading     Float?
+  accuracy    Float?
+  source      LocationSource
+  recordedAt  DateTime
+
+  emergency Emergency @relation(fields: [emergencyId], references: [id])
+
+  @@index([emergencyId, recordedAt])
+  @@map("location_pings")
+}
+
+model RoadClosure {
+  id            String   @id @default(uuid())
+  polygonGeoJson Json
+  createdById   String
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  createdBy User @relation(fields: [createdById], references: [id])
+
+  @@map("road_closures")
+}
+
+model Signal {
+  id   String  @id @default(uuid())
+  name String?
+  lat  Float
+  lng  Float
+  city String?
+
+  @@map("signals")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  actorId     String?  // null = system action
+  action      String
+  entityType  String
+  entityId    String
+  payload     Json?
+  at          DateTime @default(now())
+
+  // entityId is a generic pointer (any entity type) — not a true FK
+  actor       User?      @relation(fields: [actorId], references: [id])
+
+  @@map("audit_logs")
+}

@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Environment
+.env
+.env.local
+
+# Build output
+dist/
+build/
+
+# Prisma generated client (generated at runtime)
+server/node_modules/.prisma/
+
+# Uploads (user data, not committed)
+server/uploads/
+
+# Seed data fetched from Overpass (committed once fetched)
+# server/seed/*.json  <-- intentionally NOT ignored
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# TypeScript incremental build info
+*.tsbuildinfo
