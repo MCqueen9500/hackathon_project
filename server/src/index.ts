@@ -5,17 +5,29 @@ import { prisma } from "./lib/prisma";
 import { initSocketIO } from "./lib/socket";
 import { Scheduler } from "./services/Scheduler";
 import { emergencyService } from "./services/instances";
+import { signalController } from "./services/signals/SimulatedSignalController";
 
 async function main() {
   const app = createApp();
   const httpServer = createServer(app);
 
   // ─── Socket.IO (JWT-authenticated, room-based) ────────────────────────────
-  initSocketIO(httpServer, env.CORS_ORIGIN);
+  const io = initSocketIO(httpServer, env.CORS_ORIGIN);
+
+  // ─── Signal controller init ───────────────────────────────────────────────
+  // Load signals from DB and wire the socket broadcast emitter.
+  const signals = await prisma.signal.findMany({
+    select: { id: true, name: true, lat: true, lng: true },
+  });
+  signalController.init(signals);
+  signalController.setEmitter((snapshots) => {
+    try {
+      io.emit("signals:updated", { signals: snapshots });
+    } catch { /* ignore */ }
+  });
+  console.log(`[server] Loaded ${signals.length} signals into SignalController`);
 
   // ─── DB-polling scheduler ─────────────────────────────────────────────────
-  // Handles hospital/police timeouts and bed hold expiry.
-  // runNow() fires immediately so deadlines missed during downtime are caught.
   const scheduler = new Scheduler(emergencyService);
   scheduler.start();
 
@@ -23,6 +35,7 @@ async function main() {
   const shutdown = async (signal: string) => {
     console.log(`\n[server] Received ${signal}. Shutting down gracefully…`);
     scheduler.stop();
+    signalController.destroy();
     httpServer.close(async () => {
       await prisma.$disconnect();
       console.log("[server] DB disconnected. Bye.");

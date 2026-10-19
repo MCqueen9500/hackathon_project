@@ -1,11 +1,15 @@
 /**
- * ActiveEmergency — live status timeline + map placeholder.
- * Shows police/hospital approval status, ETA, cancel and arrived buttons.
+ * ActiveEmergency — live status timeline + map with GPS/Simulator tracking.
+ * Shows police/hospital approval status, ETA, cancel/arrived buttons,
+ * Live GPS / Simulator toggle, Wake Lock, stale-location indicator, and
+ * live signal colours on the map.
  */
 
+import { useState, useEffect } from "react";
 import type { Emergency } from "../../types/emergency";
-import { MapLibreMap } from "../../components/MapLibreMap";
-
+import { MapLibreMap, type SignalSnapshot } from "../../components/MapLibreMap";
+import { useLocationTracker } from "../../hooks/useLocationTracker";
+import { api } from "../../lib/api";
 
 interface Props {
   emergency: Emergency;
@@ -44,9 +48,47 @@ function formatEta(s: number | null) {
 }
 
 export function ActiveEmergency({ emergency: em, onCancel, onArrived, busy }: Props) {
-  const isFinal = ["CLOSED","CANCELLED","REJECTED","EXPIRED"].includes(em.status);
+  const isFinal   = ["CLOSED","CANCELLED","REJECTED","EXPIRED"].includes(em.status);
   const canArrive = em.status === "ACTIVE";
   const canCancel = !isFinal && em.status !== "ARRIVED";
+  const isActive  = em.status === "ACTIVE";
+
+  // ── Signals state ────────────────────────────────────────────────────────
+  const [signals, setSignals] = useState<SignalSnapshot[]>([]);
+
+  // Fetch initial signal state
+  useEffect(() => {
+    api.get<{ signals: SignalSnapshot[] }>("/signals")
+      .then((r) => setSignals(r.data.signals))
+      .catch(() => {});
+  }, []);
+
+  // Listen for live signal updates via socket (socket events handled in parent
+  // via useSocket hook; here we listen directly on the window)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ signals: SignalSnapshot[] }>).detail;
+      if (detail?.signals) setSignals(detail.signals);
+    };
+    window.addEventListener("signals:updated", handler);
+    return () => window.removeEventListener("signals:updated", handler);
+  }, []);
+
+  // ── Location tracker ─────────────────────────────────────────────────────
+  const tracker = useLocationTracker({
+    emergencyId: em.id,
+    speedKmh: 40,
+  });
+
+
+  const handleTrackingToggle = async (mode: "GPS" | "SIMULATOR") => {
+    if (tracker.mode === mode) {
+      await tracker.stopTracking();
+    } else {
+      if (tracker.mode !== "OFF") await tracker.stopTracking();
+      await tracker.startTracking(mode);
+    }
+  };
 
   return (
     <div className="flex flex-col gap-5">
@@ -72,24 +114,82 @@ export function ActiveEmergency({ emergency: em, onCancel, onArrived, busy }: Pr
         </div>
       </div>
 
-      {/* Map — route + ambulance marker */}
+      {/* Map — route + ambulance + signals */}
       {em.originLat && em.originLng ? (
         <MapLibreMap
           key={`${em.id}-${em.selectedHospitalId}`}
           originLat={em.originLat}
           originLng={em.originLng}
+          liveLat={tracker.lat}
+          liveLng={tracker.lng}
           destLat={em.selectedHospital?.lat}
           destLng={em.selectedHospital?.lng}
           routeGeoJson={em.routeGeoJson}
           ambulanceMarker
-          className="h-52 w-full border border-gray-800"
+          signals={signals}
+          className="h-64 w-full border border-gray-800"
         />
       ) : (
         <div className="bg-gray-900 border border-gray-800 rounded-2xl h-52 flex items-center justify-center">
-          <div className="text-center text-gray-600">
-            <p className="text-3xl mb-2">🗺️</p>
-            <p className="text-sm">Waiting for location…</p>
+          <p className="text-gray-600 text-sm">🗺️ Waiting for location…</p>
+        </div>
+      )}
+
+      {/* GPS / Simulator tracking controls */}
+      {isActive && (
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+          <p className="text-xs text-gray-400 uppercase tracking-wider mb-3">Location Tracking</p>
+
+          {/* Stale indicator */}
+          {tracker.stale && (
+            <div className="mb-3 flex items-center gap-2 bg-amber-950/60 border border-amber-800 rounded-xl px-3 py-2">
+              <span className="text-amber-400 text-sm">⚠️</span>
+              <p className="text-xs text-amber-300">
+                Last location {tracker.staleSeconds}s ago — check signal
+              </p>
+            </div>
+          )}
+
+          {tracker.error && (
+            <div className="mb-3 bg-red-950/60 border border-red-900 rounded-xl px-3 py-2">
+              <p className="text-xs text-red-400">{tracker.error}</p>
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <button
+              id="driver-gps-btn"
+              onClick={() => handleTrackingToggle("GPS")}
+              className={`flex-1 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all ${
+                tracker.mode === "GPS"
+                  ? "bg-egc-green-700 border-2 border-egc-green-500 text-white"
+                  : "bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700"
+              }`}
+            >
+              <span>📡</span>
+              {tracker.mode === "GPS" ? "GPS Live" : "Live GPS"}
+            </button>
+            <button
+              id="driver-simulator-btn"
+              onClick={() => handleTrackingToggle("SIMULATOR")}
+              className={`flex-1 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all ${
+                tracker.mode === "SIMULATOR"
+                  ? "bg-blue-700 border-2 border-blue-500 text-white"
+                  : "bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700"
+              }`}
+            >
+              <span>🎮</span>
+              {tracker.mode === "SIMULATOR" ? "Simulating…" : "Simulate"}
+            </button>
           </div>
+
+          {tracker.lat && (
+            <p className="text-xs text-gray-600 mt-2 text-center">
+              📍 {tracker.lat.toFixed(5)}, {tracker.lng?.toFixed(5)}
+              {tracker.mode === "GPS" && " · GPS"}
+              {tracker.mode === "SIMULATOR" && " · Simulated"}
+            </p>
+          )}
         </div>
       )}
 
@@ -119,14 +219,16 @@ export function ActiveEmergency({ emergency: em, onCancel, onArrived, busy }: Pr
               : "bg-gray-800"
           }`}>
             <span className="text-xl">{
-              em.status === "ACTIVE" || em.status === "ARRIVED" || em.status === "CLOSED" ? "🟢" : "⚫"
+              em.status === "ACTIVE" ? "🟢" :
+              em.status === "ARRIVED" || em.status === "CLOSED" ? "✅" : "⚫"
             }</span>
             <div>
               <p className="text-sm font-semibold text-white">Green Corridor</p>
               <p className="text-xs text-gray-400">{
-                em.status === "ACTIVE" ? "Active — signals ahead are green" :
-                em.status === "ARRIVED" || em.status === "CLOSED" ? "Completed" :
-                "Inactive"
+                em.status === "ACTIVE"
+                  ? `Active — ${signals.filter(s => s.state === "FORCED_GREEN").length} signals forced green`
+                  : em.status === "ARRIVED" || em.status === "CLOSED" ? "Completed"
+                  : "Inactive"
               }</p>
             </div>
           </div>

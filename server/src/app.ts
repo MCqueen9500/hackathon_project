@@ -33,6 +33,18 @@ export function createApp() {
   // Driver routes live at root (mix of /hospitals and /emergencies paths per spec 8)
   app.use("/", driverRouter);
 
+  // ─── Signals (authenticated, any role) ───────────────────────────────────────
+  app.get("/signals", (req, res) => {
+    // Lazy import to avoid circular deps at module load time
+    const { signalController } = require("./services/signals/SimulatedSignalController");
+    const { authenticate } = require("./middleware/authenticate");
+    // Run authenticate inline — a tiny inline guard
+    authenticate(req, res, () => {
+      res.json({ signals: signalController.getAll() });
+    });
+  });
+
+
   // ─── 404 handler ─────────────────────────────────────────────────────────────
   app.use((_req: express.Request, res: express.Response) => {
     res.status(404).json({ error: "Not found" });

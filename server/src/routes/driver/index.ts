@@ -23,9 +23,12 @@ import { photoUpload, UPLOAD_DIR } from "../../lib/upload";
 import { emergencyService } from "../../services/instances";
 import { EmergencyError } from "../../errors/EmergencyError";
 import { getIO } from "../../lib/socket";
+import { signalController } from "../../services/signals/SimulatedSignalController";
+import { haversineMeters } from "../../services/ranking/StraightLineRankingProvider";
 import type { AuthenticatedRequest } from "../../types";
 import { resolve } from "path";
 import { existsSync } from "fs";
+import { env } from "../../config/env";
 
 export const driverRouter = Router();
 
@@ -248,10 +251,16 @@ driverRouter.post(
       return;
     }
 
-    // Verify ownership
+    const emergencyId = p(req.params.id);
+
+    // Verify ownership and status
     const emergency = await prisma.emergency.findUnique({
-      where: { id: p(req.params.id) },
-      select: { driverId: true, status: true },
+      where: { id: emergencyId },
+      select: {
+        driverId: true, status: true, severity: true, createdAt: true,
+        selectedHospitalId: true, routeGeoJson: true,
+        selectedHospital: { select: { lat: true, lng: true } },
+      },
     });
     if (!emergency) { res.status(404).json({ error: "Emergency not found" }); return; }
     if (emergency.driverId !== authReq.user.sub) { res.status(403).json({ error: "Forbidden" }); return; }
@@ -259,24 +268,70 @@ driverRouter.post(
       res.status(409).json({ error: "Emergency is not active" }); return;
     }
 
+    // ── Out-of-order rejection ─────────────────────────────────────────────
+    const recordedAt = parsed.data.recordedAt ?? new Date();
+    const latestPing = await prisma.locationPing.findFirst({
+      where: { emergencyId },
+      orderBy: { recordedAt: "desc" },
+      select: { recordedAt: true },
+    });
+    if (latestPing && recordedAt < latestPing.recordedAt) {
+      // Silently accept but don't store (idempotent for duplicate pings)
+      res.status(200).json({ ok: true, reason: "out-of-order" });
+      return;
+    }
+
     const ping = await prisma.locationPing.create({
       data: {
-        emergencyId: p(req.params.id),
+        emergencyId,
         lat:         parsed.data.lat,
         lng:         parsed.data.lng,
         speed:       parsed.data.speed,
         heading:     parsed.data.heading,
         accuracy:    parsed.data.accuracy,
         source:      parsed.data.source,
-        recordedAt:  parsed.data.recordedAt ?? new Date(),
+        recordedAt,
       },
     });
 
-    // Broadcast location update to emergency room + police
+    // ── Green-wave signal update (ACTIVE emergencies only) ─────────────────
+    if (emergency.status === "ACTIVE") {
+      const route = emergency.routeGeoJson as { type: string; coordinates: [number, number][] } | null;
+      const coords = route?.coordinates ?? [];
+      signalController.applyGreenWave(
+        parsed.data.lat,
+        parsed.data.lng,
+        coords,
+        emergencyId,
+        emergency.severity as "CRITICAL" | "SERIOUS" | "STABLE",
+        emergency.createdAt
+      );
+    }
+
+    // ── 50 m geofence → auto-mark ARRIVED ─────────────────────────────────
+    if (emergency.status === "ACTIVE" && emergency.selectedHospital) {
+      const dist = haversineMeters(
+        parsed.data.lat, parsed.data.lng,
+        emergency.selectedHospital.lat, emergency.selectedHospital.lng
+      );
+      if (dist <= 50) {
+        try {
+          await emergencyService.arrived(emergencyId, authReq.user.sub);
+          signalController.releaseAll(emergencyId);
+        } catch {
+          // Already arrived or wrong state — ignore
+        }
+      }
+    }
+
+    // ── Broadcast location update ──────────────────────────────────────────
     try {
       const io = getIO();
-      io.to(`emergency:${p(req.params.id)}`).emit("location:update", ping);
+      io.to(`emergency:${emergencyId}`).emit("location:update", ping);
       io.to("role:POLICE").emit("location:update", ping);
+      if (emergency.selectedHospitalId) {
+        io.to(`hospital:${emergency.selectedHospitalId}`).emit("location:update", ping);
+      }
     } catch { /* Socket not init in tests */ }
 
     res.status(201).json({ ping });
@@ -320,3 +375,144 @@ driverRouter.get(
     res.sendFile(filePath);
   }
 );
+
+// ── DEV ONLY: server-side simulator ──────────────────────────────────────────
+// POST /dev/simulate/:id        { speedKmh: number }  — start
+// POST /dev/simulate/:id/stop                         — stop
+// Guarded by NODE_ENV !== "production"
+if (env.NODE_ENV !== "production") {
+  const simTimers: Map<string, ReturnType<typeof setInterval>> = new Map();
+
+  const devSimSchema = z.object({ speedKmh: z.coerce.number().min(1).max(200).default(40) });
+
+  driverRouter.post(
+    "/dev/simulate/:id",
+    authenticate,
+    async (req: Request, res: Response): Promise<void> => {
+      const emergencyId = p(req.params.id);
+      const parsed = devSimSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: "Validation error", details: parsed.error.flatten() });
+        return;
+      }
+
+      const em = await prisma.emergency.findUnique({
+        where: { id: emergencyId },
+        select: {
+          status: true, driverId: true, severity: true, createdAt: true,
+          routeGeoJson: true,
+          selectedHospital: { select: { lat: true, lng: true } },
+          selectedHospitalId: true,
+        },
+      });
+      if (!em) { res.status(404).json({ error: "Emergency not found" }); return; }
+      if (!["ACTIVE"].includes(em.status)) {
+        res.status(409).json({ error: "Emergency must be ACTIVE to simulate" }); return;
+      }
+
+      const route = em.routeGeoJson as { type: string; coordinates: [number, number][] } | null;
+      const coords = route?.coordinates ?? [];
+      if (coords.length < 2) { res.status(400).json({ error: "No route coordinates" }); return; }
+
+      // Stop any existing simulation
+      if (simTimers.has(emergencyId)) {
+        clearInterval(simTimers.get(emergencyId)!);
+        simTimers.delete(emergencyId);
+      }
+
+      const speedMs = (parsed.data.speedKmh * 1000) / 3600; // m/s
+      const TICK_MS = 1000;
+      const stepM   = speedMs * (TICK_MS / 1000);
+
+      let segIdx = 0;
+      let segProgress = 0; // metres along current segment
+
+      const tick = async () => {
+        if (segIdx >= coords.length - 1) {
+          clearInterval(simTimers.get(emergencyId)!);
+          simTimers.delete(emergencyId);
+          return;
+        }
+
+        const [lngA, latA] = coords[segIdx];
+        const [lngB, latB] = coords[segIdx + 1];
+        const segLen = haversineMeters(latA, lngA, latB, lngB);
+
+        segProgress += stepM;
+        while (segProgress >= segLen && segIdx < coords.length - 1) {
+          segProgress -= segLen;
+          segIdx++;
+          if (segIdx >= coords.length - 1) break;
+        }
+
+        // Interpolate position along current segment
+        const t = segLen > 0 ? Math.min(segProgress / segLen, 1) : 0;
+        const [lngC, latC] = coords[segIdx];
+        const [lngD, latD] = coords[Math.min(segIdx + 1, coords.length - 1)];
+        const lat = latC + t * (latD - latC);
+        const lng = lngC + t * (lngD - lngC);
+
+        // Apply green-wave
+        signalController.applyGreenWave(
+          lat, lng, coords,
+          emergencyId,
+          em.severity as "CRITICAL" | "SERIOUS" | "STABLE",
+          em.createdAt
+        );
+
+        // Create ping
+        const ping = await prisma.locationPing.create({
+          data: {
+            emergencyId, lat, lng,
+            speed: parsed.data.speedKmh,
+            source: "SIMULATOR",
+            recordedAt: new Date(),
+          },
+        }).catch(() => null);
+
+        if (!ping) return;
+
+        // Broadcast
+        try {
+          const io = getIO();
+          io.to(`emergency:${emergencyId}`).emit("location:update", ping);
+          io.to("role:POLICE").emit("location:update", ping);
+          if (em.selectedHospitalId) {
+            io.to(`hospital:${em.selectedHospitalId}`).emit("location:update", ping);
+          }
+        } catch { /* ignore */ }
+
+        // Geofence check
+        if (em.selectedHospital) {
+          const dist = haversineMeters(lat, lng, em.selectedHospital.lat, em.selectedHospital.lng);
+          if (dist <= 50) {
+            clearInterval(simTimers.get(emergencyId)!);
+            simTimers.delete(emergencyId);
+            try {
+              await emergencyService.arrived(emergencyId, em.driverId);
+              signalController.releaseAll(emergencyId);
+            } catch { /* ignore */ }
+          }
+        }
+      };
+
+      const timer = setInterval(tick, TICK_MS);
+      simTimers.set(emergencyId, timer);
+
+      res.json({ ok: true, speedKmh: parsed.data.speedKmh, steps: coords.length });
+    }
+  );
+
+  driverRouter.post(
+    "/dev/simulate/:id/stop",
+    authenticate,
+    async (req: Request, res: Response): Promise<void> => {
+      const emergencyId = p(req.params.id);
+      if (simTimers.has(emergencyId)) {
+        clearInterval(simTimers.get(emergencyId)!);
+        simTimers.delete(emergencyId);
+      }
+      res.json({ ok: true });
+    }
+  );
+}

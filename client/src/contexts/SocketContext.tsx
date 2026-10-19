@@ -77,6 +77,13 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       console.warn("[socket] connect_error:", err.message)
     );
 
+    // Forward signals:updated as a DOM custom event so components can subscribe
+    // without prop-drilling through the entire tree.
+    socket.on("signals:updated", (payload: unknown) => {
+      window.dispatchEvent(new CustomEvent("signals:updated", { detail: payload }));
+    });
+
+
     return () => {
       socket.disconnect();
       socketRef.current = null;
