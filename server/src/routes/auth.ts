@@ -102,7 +102,7 @@ authRouter.post("/refresh", async (req, res) => {
 
   if (!stored.user.active) {
     // Wipe the token on the way out
-    await prisma.refreshToken.delete({ where: { id: stored.id } });
+    await prisma.refreshToken.deleteMany({ where: { id: stored.id } });
     res.status(403).json({ error: "Account has been deactivated" });
     return;
   }
@@ -112,7 +112,7 @@ authRouter.post("/refresh", async (req, res) => {
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
   await prisma.$transaction([
-    prisma.refreshToken.delete({ where: { id: stored.id } }),
+    prisma.refreshToken.deleteMany({ where: { id: stored.id } }),
     prisma.refreshToken.create({
       data: { token: newRefreshToken, userId: stored.user.id, expiresAt },
     }),
