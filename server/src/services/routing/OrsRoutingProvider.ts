@@ -25,8 +25,10 @@ const TIMEOUT_MS = 12_000;
 const PLACEHOLDER = "PLACEHOLDER_REPLACE_WITH_REAL_ORS_KEY";
 
 const osrm = new OsrmRoutingProvider();
+let orsPermanentlyDisabled = false;
 
 function isValidKey(): boolean {
+  if (orsPermanentlyDisabled) return false;
   return (
     !!env.ORS_API_KEY &&
     env.ORS_API_KEY !== PLACEHOLDER &&
@@ -84,6 +86,9 @@ export class OrsRoutingProvider implements RoutingProvider {
       });
 
       if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          orsPermanentlyDisabled = true;
+        }
         const text = await res.text().catch(() => "");
         console.warn(`[ORS] matrix HTTP ${res.status} → OSRM fallback: ${text.slice(0, 200)}`);
         return osrm.matrix(originLat, originLng, destinations);
@@ -144,6 +149,9 @@ export class OrsRoutingProvider implements RoutingProvider {
       const res = await orsPost("/v2/directions/driving-car", body);
 
       if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          orsPermanentlyDisabled = true;
+        }
         const text = await res.text().catch(() => "");
         console.warn(`[ORS] route HTTP ${res.status} → OSRM fallback: ${text.slice(0, 200)}`);
         return osrm.route(originLat, originLng, destLat, destLng);

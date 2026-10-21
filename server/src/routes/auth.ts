@@ -33,6 +33,7 @@ const loginLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => req.ip ?? "unknown",
+  skipSuccessfulRequests: true,
 });
 
 // ─── Zod schemas ─────────────────────────────────────────────────────────────
