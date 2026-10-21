@@ -12,6 +12,7 @@
     "db:studio": "prisma studio",
     "seed:fetch": "tsx src/seed/fetchOverpass.ts",
     "seed": "tsx src/seed/seed.ts",
+    "demo:reset": "tsx scripts/demo-reset.ts",
     "test": "jest --runInBand",
     "smoke": "tsx scripts/smoke.ts",
     "smoke:reject": "tsx scripts/smokeReject.ts"

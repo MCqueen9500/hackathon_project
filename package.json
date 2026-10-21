@@ -13,6 +13,7 @@
     "build": "npm run build --workspace=server && npm run build --workspace=client",
     "seed:fetch": "npm run seed:fetch --workspace=server",
     "seed": "npm run seed --workspace=server",
+    "demo:reset": "npm run demo:reset --workspace=server",
     "db:migrate": "npm run db:migrate --workspace=server",
     "db:generate": "npm run db:generate --workspace=server",
     "test": "npm run test --workspace=server"

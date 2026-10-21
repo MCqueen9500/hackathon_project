@@ -7,15 +7,27 @@ import { authRouter } from "./routes/auth";
 import { hospitalRouter } from "./routes/hospital/index";
 import { policeRouter } from "./routes/police/index";
 import { driverRouter } from "./routes/driver/index";
+import { authenticate } from "./middleware/authenticate";
+import { signalController } from "./services/signals/SimulatedSignalController";
 
 export function createApp() {
   const app = express();
 
   // ─── Security middleware ─────────────────────────────────────────────────────
   app.use(helmet());
+
+  // CORS: support a comma-separated allowlist (e.g. "http://a.com,http://b.com")
+  const allowedOrigins = env.CORS_ORIGIN.split(",").map((o) => o.trim()).filter(Boolean);
   app.use(
     cors({
-      origin: env.CORS_ORIGIN,
+      origin: (origin, cb) => {
+        // Allow server-to-server requests (no origin) and listed origins
+        if (!origin || allowedOrigins.includes(origin)) {
+          cb(null, true);
+        } else {
+          cb(new Error(`CORS: origin ${origin} not in allowlist`));
+        }
+      },
       credentials: true,
     })
   );
@@ -34,16 +46,9 @@ export function createApp() {
   app.use("/", driverRouter);
 
   // ─── Signals (authenticated, any role) ───────────────────────────────────────
-  app.get("/signals", (req, res) => {
-    // Lazy import to avoid circular deps at module load time
-    const { signalController } = require("./services/signals/SimulatedSignalController");
-    const { authenticate } = require("./middleware/authenticate");
-    // Run authenticate inline — a tiny inline guard
-    authenticate(req, res, () => {
-      res.json({ signals: signalController.getAll() });
-    });
+  app.get("/signals", authenticate, (_req, res) => {
+    res.json({ signals: signalController.getAll() });
   });
-
 
   // ─── 404 handler ─────────────────────────────────────────────────────────────
   app.use((_req: express.Request, res: express.Response) => {
@@ -61,6 +66,11 @@ export function createApp() {
       // Multer errors (file type / size)
       if (err.message?.startsWith("Only image files") || err.message?.includes("File too large")) {
         res.status(400).json({ error: err.message });
+        return;
+      }
+      // CORS errors
+      if (err.message?.startsWith("CORS:")) {
+        res.status(403).json({ error: err.message });
         return;
       }
       console.error("[ERROR]", err.message, err.stack);

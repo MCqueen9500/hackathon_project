@@ -334,7 +334,7 @@ driverRouter.post(
         deviationCounter.set(emergencyId, consecutive);
         if (consecutive >= env.DEVIATION_CONSECUTIVE_N) {
           deviationCounter.set(emergencyId, 0); // reset
-          console.log(`[Driver] Deviation detected (${distFromRoute.toFixed(0)}m) on emergency ${emergencyId} — rerouting`);
+          console.info(`[Driver] Deviation detected (${distFromRoute.toFixed(0)}m) on emergency ${emergencyId} — rerouting`);
           const emFull = await prisma.emergency.findUnique({
             where: { id: emergencyId },
             select: {

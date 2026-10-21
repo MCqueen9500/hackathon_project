@@ -172,7 +172,7 @@ async function rerouteEmergency(
       data: { emergencyId: em.id, action: "ROUTE_UPDATED" },
     });
 
-    console.log(`[ClosureService] Re-routed emergency ${em.id}`);
+    console.info(`[ClosureService] Re-routed emergency ${em.id}`);
   } catch (err) {
     console.error(`[ClosureService] Re-route failed for emergency ${em.id}:`, err);
   }

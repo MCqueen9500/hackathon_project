@@ -8,6 +8,21 @@ import { signAccessToken } from "../lib/jwt";
 import { authenticate } from "../middleware/authenticate";
 import { env } from "../config/env";
 
+/** Parse a duration string like "7d", "24h", "30m" to milliseconds. */
+function parseDurationMs(s: string): number {
+  const match = /^(\d+)([smhd])$/.exec(s.trim());
+  if (!match) return 7 * 24 * 60 * 60 * 1000; // 7d fallback
+  const n = Number(match[1]);
+  switch (match[2]) {
+    case "s": return n * 1000;
+    case "m": return n * 60 * 1000;
+    case "h": return n * 60 * 60 * 1000;
+    case "d": return n * 24 * 60 * 60 * 1000;
+    default:  return 7 * 24 * 60 * 60 * 1000;
+  }
+}
+const REFRESH_TTL_MS = parseDurationMs(env.JWT_REFRESH_EXPIRY);
+
 export const authRouter = Router();
 
 // ─── Rate limiter: 5 login attempts / minute / IP (spec section 12) ──────────
@@ -64,7 +79,7 @@ authRouter.post("/login", loginLimiter, async (req, res) => {
   });
 
   const refreshToken = uuidv4();
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+  const expiresAt = new Date(Date.now() + REFRESH_TTL_MS);
 
   await prisma.refreshToken.create({
     data: { token: refreshToken, userId: user.id, expiresAt },
@@ -109,7 +124,7 @@ authRouter.post("/refresh", async (req, res) => {
 
   // Rotate: delete old token, create new one atomically
   const newRefreshToken = uuidv4();
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const expiresAt = new Date(Date.now() + REFRESH_TTL_MS);
 
   await prisma.$transaction([
     prisma.refreshToken.deleteMany({ where: { id: stored.id } }),

@@ -19,7 +19,10 @@ jest.mock("../lib/prisma", () => ({
       update:     jest.fn(),
       updateMany: jest.fn(),
     },
-    hospital: { findMany: jest.fn() },
+    hospital: {
+      findMany:   jest.fn(),
+      findUnique: jest.fn(),
+    },
     bedHold: {
       findFirst:   jest.fn(),
       create:      jest.fn(),
