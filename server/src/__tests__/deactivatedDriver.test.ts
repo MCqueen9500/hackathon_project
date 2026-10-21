@@ -141,7 +141,7 @@ describe("(c) Deactivated driver cannot use existing token", () => {
         active: false, // ← deactivated
       },
     });
-    (prisma.refreshToken.delete as jest.Mock).mockResolvedValue({});
+    (prisma.refreshToken.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
 
     const res = await request(app)
       .post("/auth/refresh")
@@ -149,8 +149,8 @@ describe("(c) Deactivated driver cannot use existing token", () => {
 
     expect(res.status).toBe(403);
     expect(res.body.error).toMatch(/deactivated/i);
-    // Token should be deleted (cleaned up on the way out)
-    expect(prisma.refreshToken.delete).toHaveBeenCalled();
+    // Token should be cleaned up (deleteMany called with the stored token's id)
+    expect(prisma.refreshToken.deleteMany).toHaveBeenCalled();
   });
 });
 

@@ -25,6 +25,9 @@ jest.mock("../lib/prisma", () => ({
       delete: jest.fn(),
       deleteMany: jest.fn(),
     },
+    auditLog: {
+      create: jest.fn().mockResolvedValue({}), // requireRole writes here on 403
+    },
     $transaction: jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
   },
 }));

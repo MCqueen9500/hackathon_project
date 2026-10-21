@@ -397,6 +397,8 @@ describe("hospitalRevoke()", () => {
     (mBH.findFirst as jest.Mock).mockResolvedValue({ id: "bh1", hospitalId: "h1" });
     (mBH.update   as jest.Mock).mockResolvedValue({});
     mRaw.mockResolvedValue(1);
+    // hospital.findUnique called by assignNextHospital to get route coords
+    (mHosp.findUnique as jest.Mock).mockResolvedValue({ lat: 12.97, lng: 77.60 });
     (mEm.update   as jest.Mock).mockResolvedValue(mkEm({ selectedHospitalId: "h2" }));
 
     await svc.hospitalRevoke("e1", "admin-h1", "h1");
@@ -532,6 +534,9 @@ describe("hospitalTimeout()", () => {
       .mockResolvedValueOnce(em)  // findOrThrow in hospitalTimeout
       .mockResolvedValueOnce(em); // findOrThrow in assignNextHospital
 
+    // hospital lookup in assignNextHospital to get coordinates for route
+    (mHosp.findUnique as jest.Mock).mockResolvedValue({ lat: 12.97, lng: 77.60 });
+
     (mEm.update as jest.Mock).mockResolvedValue(mkEm({ selectedHospitalId: "h2", hospitalAttempt: 1 }));
 
     await svc.hospitalTimeout("e1");
@@ -550,6 +555,7 @@ describe("hospitalTimeout()", () => {
     (mEm.findUnique as jest.Mock)
       .mockResolvedValueOnce(em)
       .mockResolvedValueOnce(em);
+    // No hospital.findUnique call needed here — all candidates exhausted
     (mEm.update as jest.Mock).mockResolvedValue(mkEm({ status: "EXPIRED" }));
 
     await svc.hospitalTimeout("e1");
