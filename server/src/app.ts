@@ -7,6 +7,7 @@ import { authRouter } from "./routes/auth";
 import { hospitalRouter } from "./routes/hospital/index";
 import { policeRouter } from "./routes/police/index";
 import { driverRouter } from "./routes/driver/index";
+import { photosRouter } from "./routes/photos/index";
 import { authenticate } from "./middleware/authenticate";
 import { signalController } from "./services/signals/SimulatedSignalController";
 
@@ -41,6 +42,7 @@ export function createApp() {
   app.use("/auth", authRouter);
   app.use("/hospital", hospitalRouter);
   app.use("/police", policeRouter);
+  app.use("/photos", photosRouter);
 
   // Driver routes live at root (mix of /hospitals and /emergencies paths per spec 8)
   app.use("/", driverRouter);

@@ -18,6 +18,7 @@ import { requireRole } from "../../middleware/requireRole";
 import { driversRouter } from "./drivers";
 import { emergencyService } from "../../services/instances";
 import { EmergencyError } from "../../errors/EmergencyError";
+import { photoUrl } from "../../lib/photoToken";
 import type { AuthenticatedRequest } from "../../types";
 
 export const hospitalRouter = Router();
@@ -54,7 +55,13 @@ hospitalRouter.get(
       },
     });
 
-    res.json({ incoming: emergencies });
+    // Inject fresh signed photoUrl (hospital admin is an authorised viewer)
+    const incoming = emergencies.map((em) => ({
+      ...em,
+      photoUrl: em.photoPath ? photoUrl(em.id) : null,
+    }));
+
+    res.json({ incoming });
   }
 );
 

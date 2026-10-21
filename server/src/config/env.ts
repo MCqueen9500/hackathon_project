@@ -42,6 +42,10 @@ const envSchema = z.object({
   LOGIN_RATE_LIMIT_MAX: z.coerce.number().positive().default(5),
   LOGIN_RATE_LIMIT_WINDOW_MS: z.coerce.number().positive().default(60000),
 
+  // Photo token (HMAC-signed, 5-minute expiry by default)
+  PHOTO_HMAC_SECRET: z.string().min(16).default("change-me-photo-hmac-secret-32ch"),
+  PHOTO_TOKEN_EXPIRY_SEC: z.coerce.number().positive().default(300),
+
   // Signal timing (ms). Used by SimulatedSignalController.
   SIGNAL_RED_MS:    z.coerce.number().positive().default(30_000),
   SIGNAL_GREEN_MS:  z.coerce.number().positive().default(25_000),

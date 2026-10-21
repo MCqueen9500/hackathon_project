@@ -21,9 +21,10 @@ const SEV_COLOR: Record<string, string> = {
 };
 
 export function EmergencyDetail({ emergency: em, busy, onVerify, onReject, onBack }: Props) {
-  const photoUrl = em.photoPath
-    ? `/api/uploads/${em.photoPath.split("/").pop()}`
-    : null;
+  // Use the server-signed URL from the API payload (spec §17.4).
+  // Falls back gracefully: if the token has expired the browser will get 403
+  // and the onError handler hides the <img>.
+  const photoSrc = em.photoUrl ?? null;
 
   return (
     <div className="flex flex-col gap-5">
@@ -60,9 +61,9 @@ export function EmergencyDetail({ emergency: em, busy, onVerify, onReject, onBac
       {/* Scene photo */}
       <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
         <p className="text-xs text-gray-500 px-4 pt-4 pb-2 font-semibold">SCENE PHOTO</p>
-        {photoUrl ? (
+        {photoSrc ? (
           <img
-            src={photoUrl}
+            src={photoSrc}
             alt="Scene photo"
             className="w-full max-h-64 object-cover"
             onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}

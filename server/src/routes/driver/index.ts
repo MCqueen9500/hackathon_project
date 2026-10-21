@@ -20,6 +20,7 @@ import { prisma } from "../../lib/prisma";
 import { authenticate } from "../../middleware/authenticate";
 import { requireRole } from "../../middleware/requireRole";
 import { photoUpload, UPLOAD_DIR } from "../../lib/upload";
+import { photoUrl as signedPhotoUrl } from "../../lib/photoToken";
 import { emergencyService } from "../../services/instances";
 import { EmergencyError } from "../../errors/EmergencyError";
 import { getIO } from "../../lib/socket";
@@ -195,7 +196,12 @@ driverRouter.get(
       res.status(404).json({ error: "No active emergency" });
       return;
     }
-    res.json({ emergency });
+    res.json({
+      emergency: {
+        ...emergency,
+        photoUrl: emergency.photoPath ? signedPhotoUrl(emergency.id) : null,
+      },
+    });
   }
 );
 
@@ -218,7 +224,12 @@ driverRouter.get(
       return;
     }
 
-    res.json({ emergency });
+    res.json({
+      emergency: {
+        ...emergency,
+        photoUrl: emergency.photoPath ? signedPhotoUrl(emergency.id) : null,
+      },
+    });
   }
 );
 

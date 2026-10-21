@@ -18,6 +18,7 @@ import { requireRole } from "../../middleware/requireRole";
 import { emergencyService } from "../../services/instances";
 import { EmergencyError } from "../../errors/EmergencyError";
 import { closureService } from "../../services/ClosureService";
+import { photoUrl } from "../../lib/photoToken";
 import type { AuthenticatedRequest } from "../../types";
 
 export const policeRouter = Router();
@@ -45,7 +46,13 @@ policeRouter.get(
       },
     });
 
-    res.json({ queue: emergencies });
+    // Inject fresh signed photoUrl for each emergency that has a photo
+    const queue = emergencies.map((em) => ({
+      ...em,
+      photoUrl: em.photoPath ? photoUrl(em.id) : null,
+    }));
+
+    res.json({ queue });
   }
 );
 

@@ -39,6 +39,7 @@ export interface Emergency {
   originLat: number;
   originLng: number;
   photoPath: string | null;
+  photoUrl: string | null;   // server-signed, 5-min expiry; null if no photo
   note: string | null;
   selectedHospitalId: string | null;
   selectedHospital?: Hospital | null;
