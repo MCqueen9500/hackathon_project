@@ -1,34 +1,48 @@
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
 
 // https://vitejs.dev/config/
-export default defineConfig({
-  plugins: [react()],
-  resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-    },
-  },
-  server: {
-    port: 5173,
-    proxy: {
-      // Proxy API calls to the backend during development
-      "/api": {
-        target: "http://localhost:3001",
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, ""),
-      },
-      // Proxy socket.io connections
-      "/socket.io": {
-        target: "http://localhost:3001",
-        changeOrigin: true,
-        ws: true,
+export default defineConfig(({ mode }) => {
+  const rootEnv = loadEnv(mode, path.resolve(__dirname, ".."), "");
+  const backend = `http://127.0.0.1:${rootEnv.PORT || 3001}`;
+  const gpsMax = rootEnv.GPS_MAX_ACCURACY_M ?? "50";
+
+  return {
+    plugins: [react()],
+    envDir: path.resolve(__dirname, ".."),
+    resolve: {
+      alias: {
+        "@": path.resolve(__dirname, "./src"),
       },
     },
-  },
-  build: {
-    outDir: "dist",
-    sourcemap: true,
-  },
+    define: {
+      "import.meta.env.VITE_GPS_MAX_ACCURACY_M": JSON.stringify(gpsMax),
+    },
+    server: {
+      host: true,
+      allowedHosts: true,
+      port: 5173,
+      proxy: {
+        "/api": {
+          target: backend,
+          changeOrigin: true,
+          rewrite: (p) => p.replace(/^\/api/, ""),
+        },
+        "/socket.io": {
+          target: backend,
+          changeOrigin: true,
+          ws: true,
+        },
+        "/photos": {
+          target: backend,
+          changeOrigin: true,
+        },
+      },
+    },
+    build: {
+      outDir: "dist",
+      sourcemap: true,
+    },
+  };
 });

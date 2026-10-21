@@ -1,9 +1,9 @@
 import { api } from "../lib/api";
 import type { PoliceQueueItem, Emergency } from "../types/emergency";
 
-export async function getPoliceQueue(): Promise<PoliceQueueItem[]> {
-  const { data } = await api.get<{ queue: PoliceQueueItem[] }>("/police/queue");
-  return data.queue;
+export async function getPoliceQueue(): Promise<{ queue: PoliceQueueItem[]; live: PoliceQueueItem[] }> {
+  const { data } = await api.get<{ queue: PoliceQueueItem[]; live?: PoliceQueueItem[] }>("/police/queue");
+  return { queue: data.queue, live: data.live ?? [] };
 }
 
 export async function policeVerify(emergencyId: string): Promise<Emergency> {

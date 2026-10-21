@@ -6,13 +6,15 @@
 import { useState, useEffect } from "react";
 import type { Emergency } from "../../types/emergency";
 import { MapLibreMap } from "../../components/MapLibreMap";
+import { useLiveAmbulances } from "../../hooks/useLiveAmbulances";
+import { useSignals } from "../../hooks/useSignals";
 
 
 interface Props {
   items: Emergency[];
   loading: boolean;
   busy: boolean;
-  mode: "incoming" | "arrivals";
+  mode: "incoming" | "arrivals" | "enroute";
   onApprove?:  (id: string) => void;
   onReject?:   (id: string) => void;
   onHandover?: (id: string) => void;
@@ -52,8 +54,12 @@ function EtaCountdown({ deadline }: { deadline: string | null }) {
 export function IncomingList({
   items, loading, busy, mode, onApprove, onReject, onHandover,
 }: Props) {
+  const live = useLiveAmbulances();
+  const signals = useSignals();
   const emptyMsg = mode === "incoming"
     ? { icon: "🏥", title: "No incoming requests", sub: "Emergency requests will appear here" }
+    : mode === "enroute"
+    ? { icon: "🚑", title: "No ambulances en route", sub: "Approved emergencies appear here with live GPS" }
     : { icon: "✅", title: "No pending handovers", sub: "Arrived ambulances will appear here" };
 
   return (
@@ -88,13 +94,22 @@ export function IncomingList({
               {mode === "incoming" && <EtaCountdown deadline={em.hospitalDeadline} />}
             </div>
 
-            {/* Map: origin pin + route */}
+            {/* Map: origin pin + live ambulance (phone GPS only) */}
             <div className="mb-4 rounded-xl overflow-hidden">
               <MapLibreMap
                 key={`${em.id}-${em.selectedHospitalId}-${(em.routeGeoJson as { coordinates?: unknown[] } | null)?.coordinates?.length ?? 0}`}
                 originLat={em.originLat}
                 originLng={em.originLng}
+                liveLat={live[em.id]?.lat ?? null}
+                liveLng={live[em.id]?.lng ?? null}
+                destLat={em.selectedHospital?.lat}
+                destLng={em.selectedHospital?.lng}
                 routeGeoJson={em.routeGeoJson}
+                ambulanceMarker
+                signals={signals}
+                locationSource={live[em.id]?.source ?? null}
+                stale={!!live[em.id]?.stale}
+                staleSeconds={live[em.id]?.staleSeconds ?? 0}
                 className="h-28 w-full"
               />
             </div>

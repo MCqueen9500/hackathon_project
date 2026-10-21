@@ -24,6 +24,7 @@ export default function HospitalPage() {
 
   const [tab,       setTab]       = useState<Tab>("INCOMING");
   const [incoming,  setIncoming]  = useState<Emergency[]>([]);
+  const [enRoute,   setEnRoute]   = useState<Emergency[]>([]);
   const [arrivals,  setArrivals]  = useState<Emergency[]>([]);
   const [drivers,   setDrivers]   = useState<DriverUser[]>([]);
   const [loading,   setLoading]   = useState(true);
@@ -33,6 +34,7 @@ export default function HospitalPage() {
     try {
       const all = await getIncoming();
       setIncoming(all.filter((e: Emergency) => ["PENDING_APPROVALS"].includes(e.status)));
+      setEnRoute(all.filter((e: Emergency) => e.status === "ACTIVE"));
       setArrivals(all.filter((e: Emergency) => e.status === "ARRIVED"));
     } catch { /* ignore */ }
     finally { setLoading(false); }
@@ -131,14 +133,29 @@ export default function HospitalPage() {
 
         {/* Tab content */}
         {tab === "INCOMING" && (
-          <IncomingList
-            items={incoming}
-            loading={loading}
-            busy={busy}
-            mode="incoming"
-            onApprove={handleApprove}
-            onReject={handleReject}
-          />
+          <>
+            {(incoming.length > 0 || enRoute.length === 0) && (
+              <IncomingList
+                items={incoming}
+                loading={loading}
+                busy={busy}
+                mode="incoming"
+                onApprove={handleApprove}
+                onReject={handleReject}
+              />
+            )}
+            {enRoute.length > 0 && (
+              <div className={incoming.length > 0 ? "mt-4" : ""}>
+                <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">En route</p>
+                <IncomingList
+                  items={enRoute}
+                  loading={false}
+                  busy={busy}
+                  mode="enroute"
+                />
+              </div>
+            )}
+          </>
         )}
         {tab === "ARRIVALS" && (
           <IncomingList

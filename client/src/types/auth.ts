@@ -1,4 +1,4 @@
-export type Role = "DRIVER" | "POLICE" | "HOSPITAL_ADMIN";
+export type Role = "DRIVER" | "POLICE" | "HOSPITAL_ADMIN" | "ADMIN";
 
 export interface TokenPayload {
   sub: string;       // userId

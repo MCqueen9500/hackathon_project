@@ -5,11 +5,12 @@
  * live signal colours on the map.
  */
 
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
 import type { Emergency } from "../../types/emergency";
-import { MapLibreMap, type SignalSnapshot } from "../../components/MapLibreMap";
+import { MapLibreMap } from "../../components/MapLibreMap";
 import { useLocationTracker } from "../../hooks/useLocationTracker";
-import { api } from "../../lib/api";
+import { useLiveAmbulance } from "../../hooks/useLiveAmbulances";
+import { useSignals } from "../../hooks/useSignals";
 
 interface Props {
   emergency: Emergency;
@@ -53,42 +54,42 @@ export function ActiveEmergency({ emergency: em, onCancel, onArrived, busy }: Pr
   const canCancel = !isFinal && em.status !== "ARRIVED";
   const isActive  = em.status === "ACTIVE";
 
-  // ── Signals state ────────────────────────────────────────────────────────
-  const [signals, setSignals] = useState<SignalSnapshot[]>([]);
+  const signals = useSignals();
 
-  // Fetch initial signal state
-  useEffect(() => {
-    api.get<{ signals: SignalSnapshot[] }>("/signals")
-      .then((r) => setSignals(r.data.signals))
-      .catch(() => {});
-  }, []);
-
-  // Listen for live signal updates via socket (socket events handled in parent
-  // via useSocket hook; here we listen directly on the window)
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ signals: SignalSnapshot[] }>).detail;
-      if (detail?.signals) setSignals(detail.signals);
-    };
-    window.addEventListener("signals:updated", handler);
-    return () => window.removeEventListener("signals:updated", handler);
-  }, []);
-
-  // ── Location tracker ─────────────────────────────────────────────────────
+  // ── Location tracker (phone GPS by default; simulator remains a toggle) ─
   const tracker = useLocationTracker({
     emergencyId: em.id,
     speedKmh: 40,
+    holdWakeLock: isActive,
   });
+  const remote = useLiveAmbulance(em.id);
 
+  useEffect(() => {
+    if (isFinal) return;
+    void tracker.startTracking("GPS");
+    return () => { void tracker.stopTracking(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [em.id, isFinal]);
 
   const handleTrackingToggle = async (mode: "GPS" | "SIMULATOR") => {
     if (tracker.mode === mode) {
       await tracker.stopTracking();
     } else {
-      if (tracker.mode !== "OFF") await tracker.stopTracking();
       await tracker.startTracking(mode);
     }
   };
+
+  const liveLat = tracker.lat ?? remote?.lat ?? null;
+  const liveLng = tracker.lng ?? remote?.lng ?? null;
+  const source =
+    tracker.mode === "SIMULATOR" || remote?.source === "SIMULATOR"
+      ? "SIMULATOR" as const
+      : tracker.mode === "GPS" || remote?.source === "GPS"
+        ? "GPS" as const
+        : null;
+  const stale = tracker.stale || !!remote?.stale;
+  const staleSeconds = Math.max(tracker.staleSeconds, remote?.staleSeconds ?? 0);
+  const accuracyM = tracker.accuracy ?? remote?.accuracy ?? null;
 
   return (
     <div className="flex flex-col gap-5">
@@ -120,13 +121,18 @@ export function ActiveEmergency({ emergency: em, onCancel, onArrived, busy }: Pr
           key={`${em.id}-${em.selectedHospitalId}-${(em.routeGeoJson as { coordinates?: unknown[] } | null)?.coordinates?.length ?? 0}`}
           originLat={em.originLat}
           originLng={em.originLng}
-          liveLat={tracker.lat}
-          liveLng={tracker.lng}
+          liveLat={liveLat}
+          liveLng={liveLng}
           destLat={em.selectedHospital?.lat}
           destLng={em.selectedHospital?.lng}
           routeGeoJson={em.routeGeoJson}
           ambulanceMarker
           signals={signals}
+          showAccuracyCircle
+          accuracyM={accuracyM}
+          locationSource={source}
+          stale={stale}
+          staleSeconds={staleSeconds}
           className="h-64 w-full border border-gray-800"
         />
       ) : (
@@ -136,21 +142,29 @@ export function ActiveEmergency({ emergency: em, onCancel, onArrived, busy }: Pr
       )}
 
       {/* GPS / Simulator tracking controls */}
-      {isActive && (
+      {!isFinal && (
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
           <p className="text-xs text-gray-400 uppercase tracking-wider mb-3">Location Tracking</p>
+          <p className="text-xs font-semibold text-white mb-3">
+            Location source: {source === "SIMULATOR" ? "Simulator" : "Phone GPS"}
+          </p>
 
-          {/* Stale indicator */}
-          {tracker.stale && (
+          {stale && (
             <div className="mb-3 flex items-center gap-2 bg-amber-950/60 border border-amber-800 rounded-xl px-3 py-2">
               <span className="text-amber-400 text-sm">⚠️</span>
               <p className="text-xs text-amber-300">
-                Last location {tracker.staleSeconds}s ago — check signal
+                Last known {staleSeconds}s ago
               </p>
             </div>
           )}
 
-          {tracker.error && (
+          {tracker.permissionDenied && (
+            <div className="mb-3 bg-red-950/60 border border-red-900 rounded-xl px-3 py-2">
+              <p className="text-xs text-red-400">Location permission denied — enable GPS on this phone.</p>
+            </div>
+          )}
+
+          {tracker.error && !tracker.permissionDenied && (
             <div className="mb-3 bg-red-950/60 border border-red-900 rounded-xl px-3 py-2">
               <p className="text-xs text-red-400">{tracker.error}</p>
             </div>

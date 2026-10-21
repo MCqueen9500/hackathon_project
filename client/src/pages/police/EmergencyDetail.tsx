@@ -4,6 +4,8 @@
 
 import type { PoliceQueueItem } from "../../types/emergency";
 import { MapLibreMap } from "../../components/MapLibreMap";
+import { useLiveAmbulance } from "../../hooks/useLiveAmbulances";
+import { useSignals } from "../../hooks/useSignals";
 
 
 interface Props {
@@ -25,6 +27,8 @@ export function EmergencyDetail({ emergency: em, busy, onVerify, onReject, onBac
   // Falls back gracefully: if the token has expired the browser will get 403
   // and the onError handler hides the <img>.
   const photoSrc = em.photoUrl ?? null;
+  const ping = useLiveAmbulance(em.id);
+  const signals = useSignals();
 
   return (
     <div className="flex flex-col gap-5">
@@ -90,6 +94,16 @@ export function EmergencyDetail({ emergency: em, busy, onVerify, onReject, onBac
       <MapLibreMap
         originLat={em.originLat}
         originLng={em.originLng}
+        liveLat={ping?.lat ?? null}
+        liveLng={ping?.lng ?? null}
+        destLat={em.selectedHospital?.lat}
+        destLng={em.selectedHospital?.lng}
+        routeGeoJson={em.routeGeoJson}
+        ambulanceMarker
+        signals={signals}
+        locationSource={ping?.source ?? null}
+        stale={!!ping?.stale}
+        staleSeconds={ping?.staleSeconds ?? 0}
         className="h-40 w-full border border-gray-800"
       />
 

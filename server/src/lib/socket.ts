@@ -18,7 +18,7 @@ import type { JwtPayload } from "../types";
 // ── Singleton ─────────────────────────────────────────────────────────────────
 let _io: SocketIOServer | null = null;
 
-export function initSocketIO(httpServer: HttpServer, corsOrigin: string): SocketIOServer {
+export function initSocketIO(httpServer: HttpServer, corsOrigin: string | string[]): SocketIOServer {
   const io = new SocketIOServer(httpServer, {
     cors: { origin: corsOrigin, credentials: true },
   });
@@ -71,6 +71,11 @@ export function initSocketIO(httpServer: HttpServer, corsOrigin: string): Socket
     // Client can join a specific emergency room (e.g. driver watching their own)
     socket.on("join:emergency", (emergencyId: string) => {
       void socket.join(`emergency:${emergencyId}`);
+    });
+
+    socket.on("join", (payload: { room?: string } | string) => {
+      const room = typeof payload === "string" ? payload : payload?.room;
+      if (room) void socket.join(room);
     });
 
     socket.on("leave:emergency", (emergencyId: string) => {

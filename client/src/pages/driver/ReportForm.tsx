@@ -1,10 +1,11 @@
 /**
  * ReportForm — camera capture, severity, note, current location.
- * Fetches hospital candidates before proceeding to HospitalPicker.
+ * Origin is always this phone's GPS at report time (never a default/typed location).
  */
 
-import { useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { getCandidates } from "../../api/driverApi";
+import { GPS_MAX_ACCURACY_M } from "../../lib/config";
 import type { HospitalCandidate, Severity } from "../../types/emergency";
 
 interface ReportData {
@@ -36,8 +37,10 @@ export function ReportForm({ onBack, onNext }: Props) {
   const [note,     setNote]     = useState("");
   const [busy,     setBusy]     = useState(false);
   const [error,    setError]    = useState<string | null>(null);
-  const [locating, setLocating] = useState(false);
-  const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [locating, setLocating] = useState(true);
+  const [location, setLocation] = useState<{ lat: number; lng: number; accuracy: number | null } | null>(null);
+  const [locError, setLocError] = useState<string | null>(null);
+  const watchIdRef = useRef<number | null>(null);
 
   const handleFile = (e: ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -47,25 +50,57 @@ export function ReportForm({ onBack, onNext }: Props) {
     setError(null);
   };
 
+  const stopWatch = () => {
+    if (watchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+  };
+
   const getLocation = () => {
+    if (!navigator.geolocation) {
+      setLocError("Geolocation is not available on this device.");
+      setLocating(false);
+      return;
+    }
     setLocating(true);
-    navigator.geolocation.getCurrentPosition(
+    setLocError(null);
+    stopWatch();
+
+    watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
-        setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        const { latitude, longitude, accuracy } = pos.coords;
+        if (accuracy !== null && Number.isFinite(accuracy) && accuracy > GPS_MAX_ACCURACY_M) {
+          setLocError(`Waiting for GPS (accuracy ${Math.round(accuracy)} m, need ≤ ${GPS_MAX_ACCURACY_M} m)…`);
+          return;
+        }
+        setLocation({ lat: latitude, lng: longitude, accuracy: accuracy ?? null });
         setLocating(false);
+        setLocError(null);
+        stopWatch();
       },
-      () => {
-        // Fallback to demo centre from env or hardcoded Bengaluru
-        setLocation({ lat: 12.9716, lng: 77.5946 });
+      (err) => {
         setLocating(false);
+        setLocation(null);
+        if (err.code === err.PERMISSION_DENIED) {
+          setLocError("Location permission denied — enable GPS on this phone to report.");
+        } else {
+          setLocError(`Could not get GPS: ${err.message}`);
+        }
       },
-      { enableHighAccuracy: true, timeout: 8000 }
+      { enableHighAccuracy: true, timeout: 15_000, maximumAge: 0 }
     );
   };
 
+  useEffect(() => {
+    getLocation();
+    return () => stopWatch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleSubmit = async () => {
     if (!photo)    { setError("Please capture or upload a photo."); return; }
-    if (!location) { setError("Please get your location first."); return; }
+    if (!location) { setError("Waiting for this phone's GPS — cannot use a default location."); return; }
     setBusy(true);
     setError(null);
     try {
@@ -151,13 +186,16 @@ export function ReportForm({ onBack, onNext }: Props) {
         </div>
       </div>
 
-      {/* Location */}
+      {/* Location — phone GPS only */}
       <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5">
-        <p className="text-sm font-semibold text-gray-300 mb-3">📍 Location <span className="text-egc-red-500">*</span></p>
+        <p className="text-sm font-semibold text-gray-300 mb-3">📍 Phone GPS <span className="text-egc-red-500">*</span></p>
         {location ? (
-          <div className="flex items-center gap-3 text-sm">
-            <span className="text-egc-green-400">✓ Got location</span>
+          <div className="flex items-center gap-3 text-sm flex-wrap">
+            <span className="text-egc-green-400">✓ Phone GPS</span>
             <span className="text-gray-500">{location.lat.toFixed(5)}, {location.lng.toFixed(5)}</span>
+            {location.accuracy != null && (
+              <span className="text-gray-600">±{Math.round(location.accuracy)} m</span>
+            )}
             <button onClick={getLocation} className="ml-auto text-xs text-gray-500 hover:text-gray-300">Refresh</button>
           </div>
         ) : (
@@ -166,8 +204,13 @@ export function ReportForm({ onBack, onNext }: Props) {
             disabled={locating}
             className="w-full bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-xl py-3 text-sm text-gray-300 flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
           >
-            {locating ? <><span className="animate-spin w-4 h-4 border-2 border-gray-300 border-t-transparent rounded-full" /> Locating…</> : "📍 Get Current Location"}
+            {locating
+              ? <><span className="animate-spin w-4 h-4 border-2 border-gray-300 border-t-transparent rounded-full" /> Getting phone GPS…</>
+              : "📍 Retry phone GPS"}
           </button>
+        )}
+        {locError && (
+          <p className={`text-xs mt-2 ${location ? "text-amber-400" : "text-egc-red-400"}`}>{locError}</p>
         )}
       </div>
 

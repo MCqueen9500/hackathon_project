@@ -20,6 +20,7 @@ import LoginPage    from "./pages/LoginPage";
 import DriverPage   from "./pages/DriverPage";
 import PolicePage   from "./pages/PolicePage";
 import HospitalPage from "./pages/HospitalPage";
+import SignalsPage  from "./pages/admin/SignalsPage";
 import NotFoundPage from "./pages/NotFoundPage";
 
 export default function App() {
@@ -42,6 +43,11 @@ export default function App() {
 
       <Route element={<ProtectedRoute allowedRole="HOSPITAL_ADMIN" />}>
         <Route path="/hospital/*" element={<HospitalPage />} />
+      </Route>
+
+      <Route element={<ProtectedRoute allowedRole="ADMIN" />}>
+        <Route path="/admin/signals" element={<SignalsPage />} />
+        <Route path="/admin/*" element={<SignalsPage />} />
       </Route>
 
       {/* 404 */}

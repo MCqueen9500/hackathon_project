@@ -2,12 +2,10 @@
  * SimulatedSignalController (spec section 10)
  *
  * - Keeps signal state entirely in memory (backed by DB at boot for initial load).
- * - Normal cycle: RED 30s → GREEN 25s → YELLOW 5s → RED (env configurable).
+ * - Normal cycle: RED → GREEN → YELLOW → RED (env configurable).
  * - Corridor override: FORCED_GREEN wins over normal cycle.
  * - Conflict rule: higher severity wins; equal severity → earlier createdAt wins.
  * - Broadcasts `signals:updated` via Socket.IO when state changes.
- *
- * Seeded from the `Signal` table on `init()`.
  */
 
 import type { SignalController, SignalClaim, SignalSnapshot, SignalState } from "./SignalController";
@@ -17,34 +15,31 @@ import { env } from "../../config/env";
 const CYCLE_RED_MS    = env.SIGNAL_RED_MS;
 const CYCLE_GREEN_MS  = env.SIGNAL_GREEN_MS;
 const CYCLE_YELLOW_MS = env.SIGNAL_YELLOW_MS;
+const AHEAD_M         = env.SIGNAL_AHEAD_M;
+const PASSED_M        = env.SIGNAL_PASSED_M;
+const ON_ROUTE_M      = 80;
 
 interface SignalRecord {
   id: string;
   name: string | null;
   lat: number;
   lng: number;
-  // Normal-cycle phase tracking
-  cycleOffset: number;   // ms offset into current cycle at boot
-  cycleTotal:  number;   // RED+GREEN+YELLOW = 60 s
-  // Active corridor overrides: map of emergencyId → claim
+  simulated: boolean;
+  cycleOffset: number;
+  cycleTotal:  number;
   claims: Map<string, SignalClaim>;
 }
 
-// Severity ordering (lower = higher priority)
 const SEVERITY_RANK: Record<string, number> = {
   CRITICAL: 0,
   SERIOUS:  1,
   STABLE:   2,
 };
 
-function winnerClaim(
-  a: SignalClaim,
-  b: SignalClaim
-): SignalClaim {
+function winnerClaim(a: SignalClaim, b: SignalClaim): SignalClaim {
   const ra = SEVERITY_RANK[a.severity] ?? 99;
   const rb = SEVERITY_RANK[b.severity] ?? 99;
   if (ra !== rb) return ra < rb ? a : b;
-  // Equal severity → earlier createdAt wins
   return a.createdAt <= b.createdAt ? a : b;
 }
 
@@ -52,49 +47,75 @@ export class SimulatedSignalController implements SignalController {
   private signals: Map<string, SignalRecord> = new Map();
   private cycleTimer: ReturnType<typeof setInterval> | null = null;
   private emitFn: ((snapshots: SignalSnapshot[]) => void) | null = null;
+  private lastFingerprint = "";
 
-  /** Call after instantiation with a snapshot-broadcast function. */
   setEmitter(fn: (snapshots: SignalSnapshot[]) => void) {
     this.emitFn = fn;
   }
 
-  /** Seed signal records from the DB rows. */
-  init(rows: { id: string; name: string | null; lat: number; lng: number }[]) {
+  init(rows: { id: string; name: string | null; lat: number; lng: number; simulated?: boolean }[]) {
+    this.signals.clear();
     const now = Date.now();
     const total = CYCLE_RED_MS + CYCLE_GREEN_MS + CYCLE_YELLOW_MS;
 
     for (const row of rows) {
-      // Stagger offsets so not all signals change at once
       const offset = Math.floor(Math.random() * total);
       this.signals.set(row.id, {
         id:          row.id,
         name:        row.name,
         lat:         row.lat,
         lng:         row.lng,
-        cycleOffset: (now % total + offset) % total,
+        simulated:   row.simulated ?? false,
+        cycleOffset: now - offset,
         cycleTotal:  total,
         claims:      new Map(),
       });
     }
 
-    // Start normal cycle tick every 500 ms
     if (this.cycleTimer) clearInterval(this.cycleTimer);
-    this.cycleTimer = setInterval(() => this._tick(), 500);
-
+    this.cycleTimer = setInterval(() => this._tick(), 1_000);
+    this.lastFingerprint = "";
+    this._emit();
     console.log(`[signals] Initialised ${rows.length} signals`);
+  }
+
+  upsert(row: { id: string; name: string | null; lat: number; lng: number; simulated?: boolean }) {
+    const existing = this.signals.get(row.id);
+    const total = CYCLE_RED_MS + CYCLE_GREEN_MS + CYCLE_YELLOW_MS;
+    if (existing) {
+      existing.name = row.name;
+      existing.lat = row.lat;
+      existing.lng = row.lng;
+      if (row.simulated !== undefined) existing.simulated = row.simulated;
+    } else {
+      this.signals.set(row.id, {
+        id:          row.id,
+        name:        row.name,
+        lat:         row.lat,
+        lng:         row.lng,
+        simulated:   row.simulated ?? false,
+        cycleOffset: Date.now() - Math.floor(Math.random() * total),
+        cycleTotal:  total,
+        claims:      new Map(),
+      });
+    }
+    this._emit(true);
+  }
+
+  remove(id: string) {
+    if (!this.signals.delete(id)) return;
+    this._emit(true);
   }
 
   private _cycleState(record: SignalRecord): SignalState {
     const phase = (Date.now() - record.cycleOffset) % record.cycleTotal;
-    if (phase < CYCLE_RED_MS)                                   return "RED";
-    if (phase < CYCLE_RED_MS + CYCLE_GREEN_MS)                  return "GREEN";
+    if (phase < CYCLE_RED_MS)                  return "RED";
+    if (phase < CYCLE_RED_MS + CYCLE_GREEN_MS) return "GREEN";
     return "YELLOW";
   }
 
   private _effectiveState(record: SignalRecord): SignalState {
     if (record.claims.size === 0) return this._cycleState(record);
-
-    // Find winning claim
     let winner: SignalClaim | null = null;
     for (const claim of record.claims.values()) {
       winner = winner ? winnerClaim(winner, claim) : claim;
@@ -102,25 +123,41 @@ export class SimulatedSignalController implements SignalController {
     return winner ? "FORCED_GREEN" : this._cycleState(record);
   }
 
-  private _tick() {
+  private _fingerprint(snapshots: SignalSnapshot[]): string {
+    return snapshots.map((s) => `${s.id}:${s.state}:${s.lat.toFixed(5)}:${s.lng.toFixed(5)}`).join("|");
+  }
+
+  private _emit(force = false) {
     const snapshots = this.getAll();
+    const fp = this._fingerprint(snapshots);
+    if (!force && fp === this.lastFingerprint) return;
+    this.lastFingerprint = fp;
     this.emitFn?.(snapshots);
   }
 
-  // ── SignalController ──────────────────────────────────────────────────────────
+  private _tick() {
+    this._emit();
+  }
 
   forceGreen(signalId: string, claim: SignalClaim) {
-    const rec = this.signals.get(signalId);
-    if (!rec) return;
-    rec.claims.set(claim.emergencyId, claim);
-    this.emitFn?.(this.getAll());
+    if (this._forceGreen(signalId, claim)) this._emit(true);
   }
 
   release(signalId: string, emergencyId: string) {
+    if (this._release(signalId, emergencyId)) this._emit(true);
+  }
+
+  private _forceGreen(signalId: string, claim: SignalClaim): boolean {
     const rec = this.signals.get(signalId);
-    if (!rec) return;
-    rec.claims.delete(emergencyId);
-    this.emitFn?.(this.getAll());
+    if (!rec) return false;
+    rec.claims.set(claim.emergencyId, claim);
+    return true;
+  }
+
+  private _release(signalId: string, emergencyId: string): boolean {
+    const rec = this.signals.get(signalId);
+    if (!rec) return false;
+    return rec.claims.delete(emergencyId);
   }
 
   releaseAll(emergencyId: string) {
@@ -131,18 +168,19 @@ export class SimulatedSignalController implements SignalController {
         changed = true;
       }
     }
-    if (changed) this.emitFn?.(this.getAll());
+    if (changed) this._emit(true);
   }
 
   getAll(): SignalSnapshot[] {
     const out: SignalSnapshot[] = [];
     for (const rec of this.signals.values()) {
       out.push({
-        id:    rec.id,
-        name:  rec.name,
-        lat:   rec.lat,
-        lng:   rec.lng,
-        state: this._effectiveState(rec),
+        id:         rec.id,
+        name:       rec.name,
+        lat:        rec.lat,
+        lng:        rec.lng,
+        state:      this._effectiveState(rec),
+        simulated:  rec.simulated,
       });
     }
     return out;
@@ -156,16 +194,6 @@ export class SimulatedSignalController implements SignalController {
     return ids;
   }
 
-  /**
-   * Green-wave update: called on every location ping for ACTIVE emergencies.
-   *
-   * @param lat          Current ambulance lat
-   * @param lng          Current ambulance lng
-   * @param routeCoords  [lng, lat][] GeoJSON route coordinates
-   * @param emergencyId  ID of the emergency
-   * @param severity     Severity for conflict resolution
-   * @param createdAt    CreatedAt for conflict resolution
-   */
   applyGreenWave(
     lat: number,
     lng: number,
@@ -174,63 +202,62 @@ export class SimulatedSignalController implements SignalController {
     severity: "CRITICAL" | "SERIOUS" | "STABLE",
     createdAt: Date
   ) {
-    const AHEAD_M  = Number(process.env.SIGNAL_AHEAD_M   ?? 400);
-    const PASSED_M = Number(process.env.SIGNAL_PASSED_M  ?? 100);
-
     const claim: SignalClaim = { emergencyId, severity, createdAt };
+    const amb = this._projectOnRoute(lat, lng, routeCoords);
+    let changed = false;
 
     for (const [id, rec] of this.signals.entries()) {
-      // Distance from ambulance to signal
-      const dToAmb = haversineMeters(lat, lng, rec.lat, rec.lng);
+      const proj = this._projectOnRoute(rec.lat, rec.lng, routeCoords);
 
-      // Project signal onto route to determine if it is "ahead" or "passed"
-      const projDist = this._projectOnRoute(rec.lat, rec.lng, routeCoords);
-      const ambDist  = this._projectOnRoute(lat, lng, routeCoords);
+      if (proj.distToRoute > ON_ROUTE_M) {
+        if (this._release(id, emergencyId)) changed = true;
+        continue;
+      }
 
-      const isAhead  = projDist > ambDist && projDist - ambDist <= AHEAD_M;
-      const isPassed = ambDist - projDist > PASSED_M;
+      const isAhead  = proj.alongM > amb.alongM && proj.alongM - amb.alongM <= AHEAD_M;
+      const isPassed = amb.alongM - proj.alongM > PASSED_M;
 
-      if (isAhead && dToAmb < AHEAD_M * 1.5) {
-        this.forceGreen(id, claim);
+      if (isAhead) {
+        if (this._forceGreen(id, claim)) changed = true;
       } else if (isPassed) {
-        this.release(id, emergencyId);
+        if (this._release(id, emergencyId)) changed = true;
       }
     }
+    if (changed) this._emit(true);
   }
 
   /**
-   * Returns the cumulative distance (metres) of the closest point on `routeCoords`
-   * to the given lat/lng. Used to determine "ahead" vs "passed".
+   * Closest-point projection onto the polyline. `alongM` is distance from the
+   * start of the route; `distToRoute` is perpendicular distance to the line.
    */
   private _projectOnRoute(
     lat: number,
     lng: number,
     routeCoords: [number, number][]
-  ): number {
-    if (routeCoords.length === 0) return 0;
+  ): { alongM: number; distToRoute: number } {
+    if (routeCoords.length === 0) return { alongM: 0, distToRoute: Infinity };
+    if (routeCoords.length === 1) {
+      const [lng0, lat0] = routeCoords[0];
+      return { alongM: 0, distToRoute: haversineMeters(lat, lng, lat0, lng0) };
+    }
 
-    let minDist   = Infinity;
-    let minI      = 0;
-    let cumBefore = 0;
-    let segCums: number[] = [0];
+    let bestDist = Infinity;
+    let bestAlong = 0;
+    let cum = 0;
 
     for (let i = 1; i < routeCoords.length; i++) {
       const [lngA, latA] = routeCoords[i - 1];
       const [lngB, latB] = routeCoords[i];
-      segCums.push(segCums[i - 1] + haversineMeters(latA, lngA, latB, lngB));
-    }
-
-    for (let i = 0; i < routeCoords.length; i++) {
-      const [lngC, latC] = routeCoords[i];
-      const d = haversineMeters(lat, lng, latC, lngC);
-      if (d < minDist) {
-        minDist = d;
-        minI    = i;
-        cumBefore = segCums[i];
+      const segLen = haversineMeters(latA, lngA, latB, lngB);
+      const { t, dist } = closestOnSegment(lat, lng, latA, lngA, latB, lngB);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestAlong = cum + t * segLen;
       }
+      cum += segLen;
     }
 
-    return cumBefore;
+    return { alongM: bestAlong, distToRoute: bestDist };
   }
 
   destroy() {
@@ -239,6 +266,25 @@ export class SimulatedSignalController implements SignalController {
       this.cycleTimer = null;
     }
   }
+}
+
+/** Unit-interval t of the closest point on segment AB to P, plus distance in metres. */
+function closestOnSegment(
+  latP: number, lngP: number,
+  latA: number, lngA: number,
+  latB: number, lngB: number
+): { t: number; dist: number } {
+  const dLat = latB - latA;
+  const dLng = lngB - lngA;
+  const len2 = dLat * dLat + dLng * dLng;
+  let t = 0;
+  if (len2 > 0) {
+    t = ((latP - latA) * dLat + (lngP - lngA) * dLng) / len2;
+    t = Math.max(0, Math.min(1, t));
+  }
+  const latC = latA + t * dLat;
+  const lngC = lngA + t * dLng;
+  return { t, dist: haversineMeters(latP, lngP, latC, lngC) };
 }
 
 export const signalController = new SimulatedSignalController();

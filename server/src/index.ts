@@ -1,6 +1,6 @@
 import { createServer } from "http";
 import { createApp } from "./app";
-import { env } from "./config/env";
+import { env, allowedOrigins } from "./config/env";
 import { prisma } from "./lib/prisma";
 import { initSocketIO } from "./lib/socket";
 import { Scheduler } from "./services/Scheduler";
@@ -12,12 +12,12 @@ async function main() {
   const httpServer = createServer(app);
 
   // ─── Socket.IO (JWT-authenticated, room-based) ────────────────────────────
-  const io = initSocketIO(httpServer, env.CORS_ORIGIN);
+  const io = initSocketIO(httpServer, allowedOrigins());
 
   // ─── Signal controller init ───────────────────────────────────────────────
   // Load signals from DB and wire the socket broadcast emitter.
   const signals = await prisma.signal.findMany({
-    select: { id: true, name: true, lat: true, lng: true },
+    select: { id: true, name: true, lat: true, lng: true, simulated: true },
   });
   signalController.init(signals);
   signalController.setEmitter((snapshots) => {

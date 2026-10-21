@@ -11,22 +11,25 @@ import type { PoliceQueueItem } from "../types/emergency";
 import { QueueList } from "./police/QueueList";
 import { EmergencyDetail } from "./police/EmergencyDetail";
 import { ClosureMap } from "./police/ClosureMap";
+import { LiveAmbulanceList } from "../components/LiveAmbulanceList";
 
-type Tab = "queue" | "closures";
+type Tab = "queue" | "live" | "closures";
 
 export default function PolicePage() {
   const { socket, refetchCount } = useSocket();
 
   const [tab,      setTab]      = useState<Tab>("queue");
   const [queue,    setQueue]    = useState<PoliceQueueItem[]>([]);
+  const [live,     setLive]     = useState<PoliceQueueItem[]>([]);
   const [selected, setSelected] = useState<PoliceQueueItem | null>(null);
   const [busy,     setBusy]     = useState(false);
   const [loading,  setLoading]  = useState(true);
 
   const fetchQueue = useCallback(async () => {
     try {
-      const q = await getPoliceQueue();
-      setQueue(q);
+      const data = await getPoliceQueue();
+      setQueue(data.queue);
+      setLive(data.live);
     } catch { /* ignore */ }
     finally { setLoading(false); }
   }, []);
@@ -91,6 +94,13 @@ export default function PolicePage() {
               </span>
             )}
           </TabBtn>
+          <TabBtn id="tab-live" active={tab === "live"} onClick={() => setTab("live")}>
+            🚑 Live {live.length > 0 && (
+              <span className="ml-1.5 bg-egc-green-600 text-white text-xs font-bold px-1.5 py-0.5 rounded-full">
+                {live.length}
+              </span>
+            )}
+          </TabBtn>
           <TabBtn id="tab-closures" active={tab === "closures"} onClick={() => setTab("closures")}>
             🚧 Closures
           </TabBtn>
@@ -113,6 +123,14 @@ export default function PolicePage() {
             onSelect={setSelected}
           />
         )
+      )}
+
+      {tab === "live" && (
+        <LiveAmbulanceList
+          items={live}
+          loading={loading}
+          emptyTitle="No live ambulances"
+        />
       )}
 
       {tab === "closures" && (

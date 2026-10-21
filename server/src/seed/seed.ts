@@ -63,7 +63,7 @@ async function main() {
 
   // ── Load Overpass data ───────────────────────────────────────────────────────
   const rawHospitals = loadJson<{ name: string; lat: number; lng: number }>("hospitals.json");
-  const rawSignals   = loadJson<{ lat: number; lng: number; name: string | null }>("signals.json");
+  const rawSignals   = loadJson<{ osmId?: number | string; lat: number; lng: number; name: string | null }>("signals.json");
 
   if (rawHospitals.length > 0) {
     console.log(`[seed] Loaded ${rawHospitals.length} hospitals from Overpass data`);
@@ -141,6 +141,16 @@ async function main() {
   });
   console.log("[seed] Created police user: police1");
 
+  await prisma.user.create({
+    data: {
+      name: "Platform Admin",
+      username: "admin",
+      passwordHash: adminHash,
+      role: "ADMIN",
+    },
+  });
+  console.log("[seed] Created platform admin: admin / Admin@123");
+
   // ── Create 3 drivers under hospital[0] ───────────────────────────────────────
   for (let i = 1; i <= 3; i++) {
     await prisma.user.create({
@@ -162,17 +172,23 @@ async function main() {
     : [...rawSignals, ...FALLBACK_SIGNALS].slice(0, Math.max(rawSignals.length + FALLBACK_SIGNALS.length, 10));
 
   await prisma.signal.createMany({
-    data: signalRows.map((s) => ({
-      lat: s.lat,
-      lng: s.lng,
-      name: s.name ?? null,
-      city: "Demo City",
-    })),
+    data: signalRows.map((s, i) => {
+      const osmId = "osmId" in s && s.osmId != null ? String(s.osmId) : `fallback-${i}`;
+      return {
+        lat: s.lat,
+        lng: s.lng,
+        name: s.name ?? null,
+        city: "Demo City",
+        simulated: !("osmId" in s) || s.osmId == null,
+        osmId,
+      };
+    }),
   });
-  console.log(`[seed] Created ${signalRows.length} signals`);
+  console.log(`[seed] Created ${signalRows.length} signals (${rawSignals.length} from Overpass JSON)`);
 
   console.log("\n[seed] ✅ Done!\n");
   console.log("  Demo credentials:");
+  console.log("    Platform admin  : admin                 / Admin@123");
   console.log("    Hospital admins : admin_h1 … admin_h5  / Admin@123");
   console.log("    Police          : police1               / Police@123");
   console.log("    Drivers         : driver1 … driver3     / Driver@123");

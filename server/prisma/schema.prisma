@@ -16,6 +16,7 @@ enum Role {
   DRIVER
   HOSPITAL_ADMIN
   POLICE
+  ADMIN
 }
 
 enum EmergencyStatus {
@@ -190,11 +191,13 @@ model RoadClosure {
 }
 
 model Signal {
-  id   String  @id @default(uuid())
-  name String?
-  lat  Float
-  lng  Float
-  city String?
+  id         String  @id @default(uuid())
+  name       String?
+  lat        Float
+  lng        Float
+  city       String?
+  simulated  Boolean @default(false)
+  osmId      String? @unique
 
   @@map("signals")
 }

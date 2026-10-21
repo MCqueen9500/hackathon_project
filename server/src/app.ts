@@ -1,15 +1,14 @@
 import express from "express";
 import helmet from "helmet";
 import cors from "cors";
-import { env } from "./config/env";
+import { allowedOrigins } from "./config/env";
 import { healthRouter } from "./routes/health";
 import { authRouter } from "./routes/auth";
 import { hospitalRouter } from "./routes/hospital/index";
 import { policeRouter } from "./routes/police/index";
 import { driverRouter } from "./routes/driver/index";
 import { photosRouter } from "./routes/photos/index";
-import { authenticate } from "./middleware/authenticate";
-import { signalController } from "./services/signals/SimulatedSignalController";
+import { signalsRouter } from "./routes/signals/index";
 
 export function createApp() {
   const app = express();
@@ -17,13 +16,13 @@ export function createApp() {
   // ─── Security middleware ─────────────────────────────────────────────────────
   app.use(helmet());
 
-  // CORS: support a comma-separated allowlist (e.g. "http://a.com,http://b.com")
-  const allowedOrigins = env.CORS_ORIGIN.split(",").map((o) => o.trim()).filter(Boolean);
+  // CORS: CORS_ORIGIN (comma-separated) plus PUBLIC_ORIGIN (phone HTTPS tunnel)
+  const origins = allowedOrigins();
   app.use(
     cors({
       origin: (origin, cb) => {
         // Allow server-to-server requests (no origin) and listed origins
-        if (!origin || allowedOrigins.includes(origin)) {
+        if (!origin || origins.includes(origin)) {
           cb(null, true);
         } else {
           cb(new Error(`CORS: origin ${origin} not in allowlist`));
@@ -43,14 +42,10 @@ export function createApp() {
   app.use("/hospital", hospitalRouter);
   app.use("/police", policeRouter);
   app.use("/photos", photosRouter);
+  app.use("/signals", signalsRouter);
 
   // Driver routes live at root (mix of /hospitals and /emergencies paths per spec 8)
   app.use("/", driverRouter);
-
-  // ─── Signals (authenticated, any role) ───────────────────────────────────────
-  app.get("/signals", authenticate, (_req, res) => {
-    res.json({ signals: signalController.getAll() });
-  });
 
   // ─── 404 handler ─────────────────────────────────────────────────────────────
   app.use((_req: express.Request, res: express.Response) => {

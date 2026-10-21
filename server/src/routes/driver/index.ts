@@ -74,13 +74,20 @@ const createEmergencySchema = z.object({
   city:        z.string().max(100).optional(),
 });
 
+/** Drop NaN / non-finite GPS extras so a bad heading doesn't reject the ping. */
+const optionalFinite = z.preprocess((v) => {
+  if (v === null || v === undefined || v === "") return undefined;
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}, z.number().optional());
+
 const locationSchema = z.object({
-  lat:       z.coerce.number().min(-90).max(90),
-  lng:       z.coerce.number().min(-180).max(180),
-  speed:     z.coerce.number().optional(),
-  heading:   z.coerce.number().min(0).max(360).optional(),
-  accuracy:  z.coerce.number().optional(),
-  source:    z.enum(["GPS", "SIMULATOR"]).default("GPS"),
+  lat:        z.coerce.number().min(-90).max(90),
+  lng:        z.coerce.number().min(-180).max(180),
+  speed:      optionalFinite,
+  heading:    optionalFinite,
+  accuracy:   optionalFinite,
+  source:     z.enum(["GPS", "SIMULATOR"]).default("GPS"),
   recordedAt: z.coerce.date().optional(),
 });
 
@@ -295,8 +302,19 @@ driverRouter.post(
     });
     if (!emergency) { res.status(404).json({ error: "Emergency not found" }); return; }
     if (emergency.driverId !== authReq.user.sub) { res.status(403).json({ error: "Forbidden" }); return; }
-    if (!["ACTIVE", "ARRIVED"].includes(emergency.status)) {
+    if (!["PENDING_APPROVALS", "ACTIVE", "ARRIVED"].includes(emergency.status)) {
       res.status(409).json({ error: "Emergency is not active" }); return;
+    }
+
+    // Drop GPS readings worse than GPS_MAX_ACCURACY_M (simulator pings are exempt)
+    const accuracy = parsed.data.accuracy;
+    if (
+      parsed.data.source === "GPS" &&
+      accuracy !== undefined &&
+      accuracy > env.GPS_MAX_ACCURACY_M
+    ) {
+      res.status(200).json({ ok: true, reason: "low-accuracy" });
+      return;
     }
 
     // ── Out-of-order rejection ─────────────────────────────────────────────
@@ -387,6 +405,7 @@ driverRouter.post(
     try {
       const io = getIO();
       io.to(`emergency:${emergencyId}`).emit("location:update", ping);
+      io.to(`driver:${emergency.driverId}`).emit("location:update", ping);
       io.to("role:POLICE").emit("location:update", ping);
       if (emergency.selectedHospitalId) {
         io.to(`hospital:${emergency.selectedHospitalId}`).emit("location:update", ping);
@@ -535,6 +554,7 @@ if (env.NODE_ENV !== "production") {
         try {
           const io = getIO();
           io.to(`emergency:${emergencyId}`).emit("location:update", ping);
+          io.to(`driver:${em.driverId}`).emit("location:update", ping);
           io.to("role:POLICE").emit("location:update", ping);
           if (em.selectedHospitalId) {
             io.to(`hospital:${em.selectedHospitalId}`).emit("location:update", ping);

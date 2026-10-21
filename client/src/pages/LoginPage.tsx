@@ -151,11 +151,12 @@ export default function LoginPage() {
           {/* Demo credentials hint */}
           <div className="mt-6 border-t border-gray-800 pt-5">
             <p className="text-xs text-gray-600 text-center mb-3">Demo accounts (run seed first)</p>
-            <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
               {[
                 { username: "driver1",  password: "Driver@123",  label: "Driver"   },
                 { username: "police1",  password: "Police@123",  label: "Police"   },
                 { username: "admin_h1", password: "Admin@123",   label: "Hospital" },
+                { username: "admin",    password: "Admin@123",   label: "Admin"    },
               ].map(({ username: u, password: p, label }) => (
                 <button
                   key={u}

@@ -33,6 +33,11 @@ const envSchema = z.object({
     .enum(["development", "production", "test"])
     .default("development"),
   CORS_ORIGIN: z.string().default("http://localhost:5173"),
+  // HTTPS tunnel (or other public URL) used to open the driver app on a phone
+  PUBLIC_ORIGIN: z.string().optional().default(""),
+
+  // Drop GPS readings worse than this many metres (client + server)
+  GPS_MAX_ACCURACY_M: z.coerce.number().positive().default(50),
 
   // Uploads
   UPLOAD_MAX_SIZE_MB: z.coerce.number().positive().default(5),
@@ -50,6 +55,8 @@ const envSchema = z.object({
   SIGNAL_RED_MS:    z.coerce.number().positive().default(30_000),
   SIGNAL_GREEN_MS:  z.coerce.number().positive().default(25_000),
   SIGNAL_YELLOW_MS: z.coerce.number().positive().default(5_000),
+  SIGNAL_AHEAD_M:   z.coerce.number().positive().default(400),
+  SIGNAL_PASSED_M:  z.coerce.number().positive().default(100),
 
   // Deviation reroute threshold
   DEVIATION_THRESHOLD_M:     z.coerce.number().positive().default(60),
@@ -68,3 +75,12 @@ if (!_parsed.success) {
 
 export const env = _parsed.data;
 export type Env = typeof env;
+
+/** CORS / Socket.IO allowlist: CORS_ORIGIN (comma-separated) plus PUBLIC_ORIGIN. */
+export function allowedOrigins(): string[] {
+  const listed = env.CORS_ORIGIN.split(",")
+    .map((o) => o.trim().replace(/\/$/, ""))
+    .filter(Boolean);
+  const pub = env.PUBLIC_ORIGIN.trim().replace(/\/$/, "");
+  return [...new Set(pub ? [...listed, pub] : listed)];
+}

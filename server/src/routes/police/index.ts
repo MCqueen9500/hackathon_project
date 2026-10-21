@@ -43,6 +43,7 @@ policeRouter.get(
         driver: {
           select: { id: true, name: true, username: true, ambulanceNo: true },
         },
+        selectedHospital: { select: { id: true, name: true, lat: true, lng: true, city: true } },
       },
     });
 
@@ -52,7 +53,22 @@ policeRouter.get(
       photoUrl: em.photoPath ? photoUrl(em.id) : null,
     }));
 
-    res.json({ queue });
+    const liveRows = await prisma.emergency.findMany({
+      where: { status: { in: ["PENDING_APPROVALS", "ACTIVE"] } },
+      orderBy: { createdAt: "desc" },
+      include: {
+        driver: {
+          select: { id: true, name: true, username: true, ambulanceNo: true },
+        },
+        selectedHospital: { select: { id: true, name: true, lat: true, lng: true, city: true } },
+      },
+    });
+    const live = liveRows.map((em) => ({
+      ...em,
+      photoUrl: em.photoPath ? photoUrl(em.id) : null,
+    }));
+
+    res.json({ queue, live });
   }
 );
 

@@ -16,6 +16,7 @@ export interface SignalSnapshot {
   lat: number;
   lng: number;
   state: SignalState;
+  simulated?: boolean;
 }
 
 /** Which active emergency is controlling a signal (for conflict resolution) */

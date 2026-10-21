@@ -17,6 +17,7 @@ export const ROLE_HOME: Record<Role, string> = {
   DRIVER:         "/driver",
   POLICE:         "/police",
   HOSPITAL_ADMIN: "/hospital",
+  ADMIN:          "/admin/signals",
 };
 
 interface ProtectedRouteProps {

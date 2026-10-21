@@ -16,12 +16,14 @@ const ROLE_LABEL: Record<Role, string> = {
   DRIVER:         "Driver",
   POLICE:         "Police",
   HOSPITAL_ADMIN: "Hospital Admin",
+  ADMIN:          "Admin",
 };
 
 const ROLE_COLOR: Record<Role, string> = {
   DRIVER:         "bg-egc-green-600",
   POLICE:         "bg-blue-600",
   HOSPITAL_ADMIN: "bg-purple-600",
+  ADMIN:          "bg-amber-600",
 };
 
 interface AppShellProps {

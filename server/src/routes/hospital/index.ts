@@ -52,6 +52,7 @@ hospitalRouter.get(
       ],
       include: {
         driver: { select: { id: true, name: true, ambulanceNo: true } },
+        selectedHospital: { select: { id: true, name: true, lat: true, lng: true, city: true } },
       },
     });
 

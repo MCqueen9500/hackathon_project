@@ -1,14 +1,8 @@
 /**
  * MapLibreMap — reusable MapLibre GL map component.
  *
- * Props:
- *  originLat / originLng  : initial ambulance / accident origin (red pin)
- *  livelat / liveLng      : live ambulance position (updates marker in place)
- *  destLat / destLng      : destination (hospital) marker (green cross)
- *  routeGeoJson           : GeoJSON LineString to draw the route
- *  ambulanceMarker        : if true, shows animated ambulance icon on origin
- *  signals                : SignalSnapshot[] to show as coloured dots on map
- *  className              : extra CSS classes
+ * Live ambulance markers animate between pings. The driver's map can show
+ * a GPS accuracy circle. Location source / last-known badge overlays the map.
  */
 
 import { useEffect, useRef } from "react";
@@ -21,12 +15,15 @@ export interface SignalSnapshot {
   lat: number;
   lng: number;
   state: "RED" | "GREEN" | "YELLOW" | "FORCED_GREEN";
+  simulated?: boolean;
 }
 
 interface GeoJsonLineString {
   type: "LineString";
   coordinates: [number, number][];
 }
+
+export type LocationSourceLabel = "GPS" | "SIMULATOR" | null | undefined;
 
 interface Props {
   originLat: number;
@@ -39,16 +36,43 @@ interface Props {
   ambulanceMarker?: boolean;
   signals?: SignalSnapshot[];
   className?: string;
+  /** Horizontal accuracy in metres — drawn as a circle on the driver map. */
+  accuracyM?: number | null;
+  showAccuracyCircle?: boolean;
+  locationSource?: LocationSourceLabel;
+  stale?: boolean;
+  staleSeconds?: number;
 }
 
 const OSM_STYLE = "https://tiles.openfreemap.org/styles/liberty";
+const ANIM_MS = 1_200;
 
-const SIGNAL_COLOR: Record<SignalSnapshot["state"], string> = {
-  RED:          "#ef4444",
-  GREEN:        "#22c55e",
-  YELLOW:       "#eab308",
-  FORCED_GREEN: "#4ade80",
-};
+function signalsToFC(signals: SignalSnapshot[]) {
+  return {
+    type: "FeatureCollection" as const,
+    features: signals.map((s) => ({
+      type: "Feature" as const,
+      id: s.id,
+      geometry: { type: "Point" as const, coordinates: [s.lng, s.lat] as [number, number] },
+      properties: { id: s.id, name: s.name, state: s.state, simulated: !!s.simulated },
+    })),
+  };
+}
+
+function circleFeature(lat: number, lng: number, radiusM: number, points = 64) {
+  const coords: [number, number][] = [];
+  const latR = radiusM / 111_320;
+  const lngR = radiusM / (111_320 * Math.max(Math.cos((lat * Math.PI) / 180), 0.01));
+  for (let i = 0; i <= points; i++) {
+    const a = (i / points) * 2 * Math.PI;
+    coords.push([lng + lngR * Math.cos(a), lat + latR * Math.sin(a)]);
+  }
+  return {
+    type: "Feature" as const,
+    geometry: { type: "Polygon" as const, coordinates: [coords] },
+    properties: {},
+  };
+}
 
 export function MapLibreMap({
   originLat,
@@ -61,12 +85,22 @@ export function MapLibreMap({
   ambulanceMarker = false,
   signals = [],
   className = "",
+  accuracyM = null,
+  showAccuracyCircle = false,
+  locationSource = null,
+  stale = false,
+  staleSeconds = 0,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef       = useRef<maplibregl.Map | null>(null);
   const ambMarkerRef = useRef<maplibregl.Marker | null>(null);
-  // Track signal markers by id for update
-  const sigMarkersRef = useRef<Map<string, HTMLElement>>(new Map());
+  const posRef       = useRef<[number, number]>([originLng, originLat]);
+  const rafRef       = useRef<number | null>(null);
+  const accuracyRef  = useRef<number | null>(accuracyM ?? null);
+  const liveRef      = useRef({ lat: liveLat, lng: liveLng, acc: accuracyM });
+  const signalsRef   = useRef(signals);
+  liveRef.current = { lat: liveLat, lng: liveLng, acc: accuracyM };
+  signalsRef.current = signals;
 
   // ── Init map once ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -87,9 +121,9 @@ export function MapLibreMap({
     map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     mapRef.current = map;
+    posRef.current = [originLng, originLat];
 
     map.on("load", () => {
-      // ── Route ──────────────────────────────────────────────────────────
       const geo = routeGeoJson as GeoJsonLineString | null | undefined;
       const hasRoute = geo?.type === "LineString" && (geo.coordinates?.length ?? 0) >= 2;
 
@@ -118,18 +152,69 @@ export function MapLibreMap({
         paint: { "line-color": "#bbf7d0", "line-width": 2, "line-opacity": 0.7,
           "line-dasharray": [0, 4, 3] } });
 
-      // ── Origin / live ambulance marker ──────────────────────────────────
+      const empty = circleFeature(originLat, originLng, 1);
+      map.addSource("accuracy", { type: "geojson", data: empty });
+      map.addLayer({
+        id: "accuracy-fill",
+        type: "fill",
+        source: "accuracy",
+        paint: { "fill-color": "#38bdf8", "fill-opacity": 0.15 },
+      });
+      map.addLayer({
+        id: "accuracy-line",
+        type: "line",
+        source: "accuracy",
+        paint: { "line-color": "#38bdf8", "line-width": 1.5, "line-opacity": 0.7 },
+      });
+
+      map.addSource("signals", { type: "geojson", data: signalsToFC(signalsRef.current) });
+      map.addLayer({
+        id: "signals-glow",
+        type: "circle",
+        source: "signals",
+        filter: ["==", ["get", "state"], "FORCED_GREEN"],
+        paint: {
+          "circle-radius": 11,
+          "circle-color": "#4ade80",
+          "circle-opacity": 0.35,
+        },
+      });
+      map.addLayer({
+        id: "signals-dots",
+        type: "circle",
+        source: "signals",
+        paint: {
+          "circle-radius": [
+            "case",
+            ["==", ["get", "state"], "FORCED_GREEN"], 7,
+            5,
+          ],
+          "circle-color": [
+            "match", ["get", "state"],
+            "RED", "#ef4444",
+            "GREEN", "#22c55e",
+            "YELLOW", "#eab308",
+            "FORCED_GREEN", "#4ade80",
+            "#9ca3af",
+          ],
+          "circle-stroke-width": 1.5,
+          "circle-stroke-color": "#ffffff",
+        },
+      });
+
       const originEl = document.createElement("div");
       originEl.innerHTML = ambulanceMarker ? "🚑" : "📍";
       originEl.style.cssText = "font-size:26px;line-height:1;cursor:default;filter:drop-shadow(0 2px 4px rgba(0,0,0,.6));";
       if (ambulanceMarker) originEl.style.animation = "pulse-ambulance 1.5s ease-in-out infinite";
 
+      const startLng = liveRef.current.lng ?? originLng;
+      const startLat = liveRef.current.lat ?? originLat;
       const ambMarker = new maplibregl.Marker({ element: originEl, anchor: "bottom" })
-        .setLngLat([originLng, originLat])
+        .setLngLat([startLng, startLat])
         .addTo(map);
       ambMarkerRef.current = ambMarker;
+      posRef.current = [startLng, startLat];
 
-      // ── Destination marker ──────────────────────────────────────────────
       if (destLat !== undefined && destLng !== undefined) {
         const destEl = document.createElement("div");
         destEl.innerHTML = "🏥";
@@ -139,34 +224,90 @@ export function MapLibreMap({
           .addTo(map);
       }
 
-      // ── Signal markers ──────────────────────────────────────────────────
-      for (const sig of signals) {
-        const el = _buildSignalEl(sig);
-        sigMarkersRef.current.set(sig.id, el);
-        new maplibregl.Marker({ element: el, anchor: "center" })
-          .setLngLat([sig.lng, sig.lat])
-          .setPopup(new maplibregl.Popup({ offset: 12 }).setText(sig.name ?? `Signal ${sig.id.slice(0, 6)}`))
-          .addTo(map);
-      }
     });
 
-    return () => { map.remove(); mapRef.current = null; ambMarkerRef.current = null; sigMarkersRef.current.clear(); };
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      map.remove();
+      mapRef.current = null;
+      ambMarkerRef.current = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Live ambulance position update ────────────────────────────────────────
-  useEffect(() => {
-    if (!ambMarkerRef.current || liveLat == null || liveLng == null) return;
-    ambMarkerRef.current.setLngLat([liveLng, liveLat]);
-  }, [liveLat, liveLng]);
-
-  // ── Live signal colour updates ────────────────────────────────────────────
-  useEffect(() => {
-    for (const sig of signals) {
-      const el = sigMarkersRef.current.get(sig.id);
-      if (el) _updateSignalEl(el, sig.state);
+  const setAccuracyCircle = (lng: number, lat: number, radiusM: number | null) => {
+    const map = mapRef.current;
+    if (!map?.getSource("accuracy")) return;
+    const src = map.getSource("accuracy") as maplibregl.GeoJSONSource;
+    if (!showAccuracyCircle || radiusM == null || radiusM <= 0) {
+      src.setData(circleFeature(lat, lng, 1));
+      map.setLayoutProperty("accuracy-fill", "visibility", "none");
+      map.setLayoutProperty("accuracy-line", "visibility", "none");
+      return;
     }
+    map.setLayoutProperty("accuracy-fill", "visibility", "visible");
+    map.setLayoutProperty("accuracy-line", "visibility", "visible");
+    src.setData(circleFeature(lat, lng, radiusM));
+  };
+
+  // ── Smooth ambulance animation between pings ──────────────────────────────
+  useEffect(() => {
+    if (liveLat == null || liveLng == null) return;
+    accuracyRef.current = accuracyM ?? null;
+
+    const to: [number, number] = [liveLng, liveLat];
+    const from = posRef.current;
+    const marker = ambMarkerRef.current;
+    const map = mapRef.current;
+    if (!marker) {
+      posRef.current = to;
+      return;
+    }
+
+    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+
+    const dist = Math.hypot(to[0] - from[0], to[1] - from[1]);
+    if (dist < 1e-8) {
+      marker.setLngLat(to);
+      posRef.current = to;
+      setAccuracyCircle(to[0], to[1], accuracyRef.current);
+      return;
+    }
+
+    const start = performance.now();
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / ANIM_MS);
+      const eased = t * (2 - t);
+      const lng = from[0] + (to[0] - from[0]) * eased;
+      const lat = from[1] + (to[1] - from[1]) * eased;
+      marker.setLngLat([lng, lat]);
+      posRef.current = [lng, lat];
+      setAccuracyCircle(lng, lat, accuracyRef.current);
+      if (t < 1) rafRef.current = requestAnimationFrame(tick);
+      else rafRef.current = null;
+    };
+    rafRef.current = requestAnimationFrame(tick);
+
+    if (map) {
+      const b = map.getBounds();
+      if (b && !b.contains(to)) {
+        map.panTo(to, { duration: ANIM_MS });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveLat, liveLng, accuracyM, showAccuracyCircle]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const src = map?.getSource("signals") as maplibregl.GeoJSONSource | undefined;
+    if (!src) return;
+    src.setData(signalsToFC(signals));
   }, [signals]);
+
+  const sourceLabel =
+    locationSource === "SIMULATOR" ? "Simulator"
+    : locationSource === "GPS" ? "Phone GPS"
+    : null;
 
   return (
     <>
@@ -188,25 +329,35 @@ export function MapLibreMap({
           50%       { box-shadow: 0 0 14px 6px rgba(74,222,128,0.9); }
         }
       `}</style>
-      <div
-        ref={containerRef}
-        className={`rounded-2xl overflow-hidden ${className}`}
-        style={{ minHeight: 200 }}
-      />
+      <div className="relative">
+        {(sourceLabel || stale) && (
+          <div className="absolute top-2 left-2 z-10 flex flex-col gap-1 pointer-events-none">
+            {sourceLabel && (
+              <span className="text-[11px] font-semibold bg-gray-950/85 text-white border border-gray-700 rounded-full px-2.5 py-1 shadow">
+                Location source: {sourceLabel}
+              </span>
+            )}
+            {stale && (
+              <span className="text-[11px] font-semibold bg-amber-950/90 text-amber-200 border border-amber-700 rounded-full px-2.5 py-1 shadow">
+                Last known {staleSeconds}s ago
+              </span>
+            )}
+          </div>
+        )}
+        {signals.length > 0 && (
+          <div className="absolute bottom-2 left-2 z-10 flex gap-2 pointer-events-none text-[10px] font-semibold bg-gray-950/80 text-white rounded-full px-2 py-1 border border-gray-700">
+            <span className="flex items-center gap-1"><i className="inline-block w-2 h-2 rounded-full bg-red-500" />Red</span>
+            <span className="flex items-center gap-1"><i className="inline-block w-2 h-2 rounded-full bg-yellow-400" />Yellow</span>
+            <span className="flex items-center gap-1"><i className="inline-block w-2 h-2 rounded-full bg-green-500" />Green</span>
+            <span className="flex items-center gap-1"><i className="inline-block w-2 h-2 rounded-full bg-lime-400" />Corridor</span>
+          </div>
+        )}
+        <div
+          ref={containerRef}
+          className={`rounded-2xl overflow-hidden ${className}`}
+          style={{ minHeight: 200 }}
+        />
+      </div>
     </>
   );
-}
-
-function _buildSignalEl(sig: SignalSnapshot): HTMLElement {
-  const el = document.createElement("div");
-  el.className = `signal-dot${sig.state === "FORCED_GREEN" ? " forced" : ""}`;
-  el.style.backgroundColor = SIGNAL_COLOR[sig.state];
-  el.title = sig.name ?? sig.id;
-  return el;
-}
-
-function _updateSignalEl(el: HTMLElement, state: SignalSnapshot["state"]) {
-  el.style.backgroundColor = SIGNAL_COLOR[state];
-  if (state === "FORCED_GREEN") el.classList.add("forced");
-  else el.classList.remove("forced");
 }

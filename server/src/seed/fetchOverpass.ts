@@ -12,9 +12,10 @@
  */
 
 import "dotenv/config";
-import { writeFileSync, mkdirSync, existsSync } from "fs";
+import { writeFileSync, mkdirSync, existsSync, readFileSync } from "fs";
 import { resolve, join } from "path";
 import { env } from "../config/env";
+import { prisma } from "../lib/prisma";
 
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
@@ -135,32 +136,97 @@ out;
 `;
 
   const signalData = await overpassQuery(signalQuery);
-  const signals: SeedSignal[] = signalData.elements.map((el) => ({
-    osmId: el.id,
-    lat: el.lat!,
-    lng: el.lon!,
-    name: el.tags?.name ?? null,
-  }));
+  const signals: SeedSignal[] = signalData.elements
+    .map((el) => {
+      const elLat = el.lat ?? el.center?.lat;
+      const elLng = el.lon ?? el.center?.lon;
+      if (elLat == null || elLng == null) return null;
+      return {
+        osmId: el.id,
+        lat: elLat,
+        lng: elLng,
+        name: el.tags?.name ?? el.tags?.["name:en"] ?? null,
+      };
+    })
+    .filter((s): s is SeedSignal => s !== null);
 
-  console.log(`[seed:fetch] Found ${signals.length} traffic signals`);
-  writeFileSync(
-    join(SEED_DIR, "signals.json"),
-    JSON.stringify(signals, null, 2)
-  );
+  console.log(`[seed:fetch] Found ${signals.length} traffic signals (highway=traffic_signals)`);
+
+  const signalsPath = join(SEED_DIR, "signals.json");
+  if (signals.length > 0) {
+    writeFileSync(signalsPath, JSON.stringify(signals, null, 2));
+  } else if (existsSync(signalsPath)) {
+    console.warn("[seed:fetch] Overpass returned 0 signals — keeping existing signals.json");
+  } else {
+    writeFileSync(signalsPath, "[]");
+  }
+
+  const toImport = signals.length > 0
+    ? signals
+    : loadSignalsJson(signalsPath);
+
+  const imported = await importSignalsToDb(toImport);
+  console.log(`[seed:fetch] Upserted ${imported} OSM signals into Signal table (simulated demo signals kept)`);
 
   console.log(`[seed:fetch] ✅ Saved to ${SEED_DIR}`);
+  await prisma.$disconnect();
 }
 
-main().catch((err) => {
+function loadSignalsJson(path: string): SeedSignal[] {
+  if (!existsSync(path)) return [];
+  try {
+    return JSON.parse(readFileSync(path, "utf-8")) as SeedSignal[];
+  } catch {
+    return [];
+  }
+}
+
+async function importSignalsToDb(signals: SeedSignal[]): Promise<number> {
+  let n = 0;
+  for (const s of signals) {
+    if (s.lat == null || s.lng == null) continue;
+    const osmId = String(s.osmId);
+    await prisma.signal.upsert({
+      where:  { osmId },
+      create: {
+        osmId,
+        lat: s.lat,
+        lng: s.lng,
+        name: s.name ?? null,
+        city: "Demo City",
+        simulated: false,
+      },
+      update: {
+        lat: s.lat,
+        lng: s.lng,
+        name: s.name ?? null,
+      },
+    });
+    n++;
+  }
+  return n;
+}
+
+main().catch(async (err) => {
   const hospitalsExist = existsSync(join(SEED_DIR, "hospitals.json"));
-  const signalsExist   = existsSync(join(SEED_DIR, "signals.json"));
+  const signalsPath    = join(SEED_DIR, "signals.json");
+  const signalsExist   = existsSync(signalsPath);
 
   if (hospitalsExist && signalsExist) {
     console.warn(`[seed:fetch] ⚠️  Overpass unreachable: ${err.message}`);
     console.warn(`[seed:fetch] ✅  Using existing fallback seed files in ${SEED_DIR}`);
+    try {
+      const existing = loadSignalsJson(signalsPath);
+      const imported = await importSignalsToDb(existing);
+      console.log(`[seed:fetch] Imported ${imported} traffic signals from signals.json into Signal table`);
+    } catch (dbErr) {
+      console.warn(`[seed:fetch] Could not write Signal table: ${(dbErr as Error).message}`);
+    }
+    await prisma.$disconnect().catch(() => {});
     process.exit(0);
   }
 
   console.error("[seed:fetch] ❌ Failed and no fallback files exist:", err);
+  await prisma.$disconnect().catch(() => {});
   process.exit(1);
 });

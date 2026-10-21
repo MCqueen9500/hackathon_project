@@ -7,7 +7,7 @@ import type { Request } from "express";
  * everywhere (which drags in the DB connection).
  */
 
-export type Role = "DRIVER" | "HOSPITAL_ADMIN" | "POLICE";
+export type Role = "DRIVER" | "HOSPITAL_ADMIN" | "POLICE" | "ADMIN";
 
 export type EmergencyStatus =
   | "PENDING_APPROVALS"
