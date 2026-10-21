@@ -91,7 +91,7 @@ export function IncomingList({
             {/* Map: origin pin + route */}
             <div className="mb-4 rounded-xl overflow-hidden">
               <MapLibreMap
-                key={`${em.id}-${em.selectedHospitalId}`}
+                key={`${em.id}-${em.selectedHospitalId}-${(em.routeGeoJson as { coordinates?: unknown[] } | null)?.coordinates?.length ?? 0}`}
                 originLat={em.originLat}
                 originLng={em.originLng}
                 routeGeoJson={em.routeGeoJson}

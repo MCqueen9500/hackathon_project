@@ -49,7 +49,7 @@ export default function DriverPage() {
     if (!socket || !emergency) return;
     socket.emit("join", { room: `emergency:${emergency.id}` });
 
-    const onUpdate = (payload: Partial<Emergency> & { emergencyId?: string }) => {
+    const onUpdate = (payload: Partial<Emergency> & { emergencyId?: string; action?: string }) => {
       if (payload.emergencyId && payload.emergencyId !== emergency.id) return;
       setEmergency((prev) => prev ? { ...prev, ...payload } as Emergency : prev);
 
@@ -60,8 +60,25 @@ export default function DriverPage() {
       }
     };
 
+    // Route updated due to closure or deviation
+    const onRouteUpdated = (payload: { emergencyId: string; routeGeoJson: unknown; etaSeconds: number; distanceMeters: number }) => {
+      if (payload.emergencyId !== emergency.id) return;
+      setEmergency((prev) => prev ? {
+        ...prev,
+        routeGeoJson: payload.routeGeoJson,
+        etaSeconds: payload.etaSeconds,
+        distanceMeters: payload.distanceMeters,
+      } as Emergency : prev);
+      setBanner("🔄 Route updated — re-routed around road closure or deviation.");
+      setTimeout(() => setBanner(null), 8000);
+    };
+
     socket.on("emergency:updated", onUpdate);
-    return () => { socket.off("emergency:updated", onUpdate); };
+    socket.on("route:updated", onRouteUpdated);
+    return () => {
+      socket.off("emergency:updated", onUpdate);
+      socket.off("route:updated", onRouteUpdated);
+    };
   }, [socket, emergency]);
 
   // ── Actions ───────────────────────────────────────────────────────────────

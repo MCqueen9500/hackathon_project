@@ -54,10 +54,12 @@ export default function HospitalPage() {
     socket.on("emergency:created", refresh);
     socket.on("emergency:updated", refresh);
     socket.on("approval:timeout",  refresh);
+    socket.on("route:updated",     refresh); // closure/deviation reroute
     return () => {
       socket.off("emergency:created", refresh);
       socket.off("emergency:updated", refresh);
       socket.off("approval:timeout",  refresh);
+      socket.off("route:updated",     refresh);
     };
   }, [socket, user?.hospitalId, fetchAll]);
 

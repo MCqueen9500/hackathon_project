@@ -109,7 +109,8 @@ export class OrsRoutingProvider implements RoutingProvider {
     originLat: number,
     originLng: number,
     destLat: number,
-    destLng: number
+    destLng: number,
+    avoidPolygons?: unknown[]
   ): Promise<DetailedRouteResult> {
     if (!isValidKey()) {
       console.info("[ORS] No valid API key → using OSRM fallback for route");
@@ -117,13 +118,30 @@ export class OrsRoutingProvider implements RoutingProvider {
     }
 
     try {
-      const res = await orsPost("/v2/directions/driving-car", {
+      const body: Record<string, unknown> = {
         coordinates: [
           [originLng, originLat],
           [destLng,   destLat],
         ],
         instructions: false,
-      });
+      };
+
+      // Inject road closure polygons as ORS avoid_polygons
+      if (avoidPolygons && avoidPolygons.length > 0) {
+        body.options = {
+          avoid_polygons: {
+            type: "MultiPolygon",
+            coordinates: avoidPolygons.map((p) => {
+              const poly = p as { type?: string; coordinates?: unknown[][]; geometry?: { coordinates?: unknown[][] } };
+              return poly.type === "Feature"
+                ? (poly.geometry?.coordinates ?? [])
+                : (poly.coordinates ?? []);
+            }),
+          },
+        };
+      }
+
+      const res = await orsPost("/v2/directions/driving-car", body);
 
       if (!res.ok) {
         const text = await res.text().catch(() => "");

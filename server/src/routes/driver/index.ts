@@ -25,6 +25,7 @@ import { EmergencyError } from "../../errors/EmergencyError";
 import { getIO } from "../../lib/socket";
 import { signalController } from "../../services/signals/SimulatedSignalController";
 import { haversineMeters } from "../../services/ranking/StraightLineRankingProvider";
+import { getAvoidPolygons, rerouteEmergency } from "../../services/ClosureService";
 import type { AuthenticatedRequest } from "../../types";
 import { resolve } from "path";
 import { existsSync } from "fs";
@@ -36,6 +37,25 @@ const guardDriver = [authenticate, requireRole("DRIVER")];
 
 /** Express params can technically be string[], but Express always gives string for named params */
 const p = (v: string | string[]): string => (Array.isArray(v) ? v[0] : v);
+
+/**
+ * Deviation tracker: counts consecutive pings that are >60 m from the route.
+ * Keyed by emergencyId. Resets to 0 when ping is within route.
+ */
+const deviationCounter = new Map<string, number>();
+
+/**
+ * Returns the minimum distance (metres) from point to any segment of the route polyline.
+ */
+function distToPolyline(lat: number, lng: number, coords: [number, number][]): number {
+  if (coords.length === 0) return Infinity;
+  let minDist = Infinity;
+  for (const [cLng, cLat] of coords) {
+    const d = haversineMeters(lat, lng, cLat, cLng);
+    if (d < minDist) minDist = d;
+  }
+  return minDist;
+}
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
@@ -306,6 +326,34 @@ driverRouter.post(
         emergency.severity as "CRITICAL" | "SERIOUS" | "STABLE",
         emergency.createdAt
       );
+
+      // ── Deviation detection (spec section 10): N consecutive >Xm → reroute ─
+      const distFromRoute = distToPolyline(parsed.data.lat, parsed.data.lng, coords);
+      if (distFromRoute > env.DEVIATION_THRESHOLD_M) {
+        const consecutive = (deviationCounter.get(emergencyId) ?? 0) + 1;
+        deviationCounter.set(emergencyId, consecutive);
+        if (consecutive >= env.DEVIATION_CONSECUTIVE_N) {
+          deviationCounter.set(emergencyId, 0); // reset
+          console.log(`[Driver] Deviation detected (${distFromRoute.toFixed(0)}m) on emergency ${emergencyId} — rerouting`);
+          const emFull = await prisma.emergency.findUnique({
+            where: { id: emergencyId },
+            select: {
+              id: true, driverId: true, selectedHospitalId: true,
+              originLat: true, originLng: true,
+              selectedHospital: { select: { lat: true, lng: true } },
+            },
+          });
+          if (emFull?.selectedHospital) {
+            const avoidPolygons = await getAvoidPolygons();
+            void rerouteEmergency(
+              { ...emFull, originLat: parsed.data.lat, originLng: parsed.data.lng },
+              avoidPolygons
+            );
+          }
+        }
+      } else {
+        deviationCounter.set(emergencyId, 0); // on-route: reset counter
+      }
     }
 
     // ── 50 m geofence → auto-mark ARRIVED ─────────────────────────────────

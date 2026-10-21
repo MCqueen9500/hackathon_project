@@ -41,6 +41,15 @@ const envSchema = z.object({
   // Rate limiting
   LOGIN_RATE_LIMIT_MAX: z.coerce.number().positive().default(5),
   LOGIN_RATE_LIMIT_WINDOW_MS: z.coerce.number().positive().default(60000),
+
+  // Signal timing (ms). Used by SimulatedSignalController.
+  SIGNAL_RED_MS:    z.coerce.number().positive().default(30_000),
+  SIGNAL_GREEN_MS:  z.coerce.number().positive().default(25_000),
+  SIGNAL_YELLOW_MS: z.coerce.number().positive().default(5_000),
+
+  // Deviation reroute threshold
+  DEVIATION_THRESHOLD_M:     z.coerce.number().positive().default(60),
+  DEVIATION_CONSECUTIVE_N:   z.coerce.number().positive().default(3),
 });
 
 const _parsed = envSchema.safeParse(process.env);

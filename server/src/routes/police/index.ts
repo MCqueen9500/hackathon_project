@@ -17,6 +17,7 @@ import { authenticate } from "../../middleware/authenticate";
 import { requireRole } from "../../middleware/requireRole";
 import { emergencyService } from "../../services/instances";
 import { EmergencyError } from "../../errors/EmergencyError";
+import { closureService } from "../../services/ClosureService";
 import type { AuthenticatedRequest } from "../../types";
 
 export const policeRouter = Router();
@@ -106,6 +107,8 @@ policeRouter.post(
         active:         true,
       },
     });
+    // Re-route any ACTIVE emergencies whose route crosses the new closure
+    void closureService.onClosureCreated(closure.id);
     res.status(201).json({ closure });
   }
 );
@@ -118,9 +121,12 @@ policeRouter.delete(
     if (!closure) { res.status(404).json({ error: "Closure not found" }); return; }
 
     await prisma.roadClosure.update({ where: { id: p(req.params.id) }, data: { active: false } });
+    // Re-route active emergencies that were avoiding this polygon (now cleared)
+    void closureService.onClosureCleared();
     res.json({ ok: true });
   }
 );
+
 
 policeRouter.get(
   "/closures",

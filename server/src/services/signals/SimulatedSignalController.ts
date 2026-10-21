@@ -12,10 +12,11 @@
 
 import type { SignalController, SignalClaim, SignalSnapshot, SignalState } from "./SignalController";
 import { haversineMeters } from "../ranking/StraightLineRankingProvider";
+import { env } from "../../config/env";
 
-const CYCLE_RED_MS    = Number(process.env.SIGNAL_RED_MS    ?? 30_000);
-const CYCLE_GREEN_MS  = Number(process.env.SIGNAL_GREEN_MS  ?? 25_000);
-const CYCLE_YELLOW_MS = Number(process.env.SIGNAL_YELLOW_MS ??  5_000);
+const CYCLE_RED_MS    = env.SIGNAL_RED_MS;
+const CYCLE_GREEN_MS  = env.SIGNAL_GREEN_MS;
+const CYCLE_YELLOW_MS = env.SIGNAL_YELLOW_MS;
 
 interface SignalRecord {
   id: string;

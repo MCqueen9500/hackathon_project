@@ -116,8 +116,8 @@ export function ActiveEmergency({ emergency: em, onCancel, onArrived, busy }: Pr
 
       {/* Map — route + ambulance + signals */}
       {em.originLat && em.originLng ? (
-        <MapLibreMap
-          key={`${em.id}-${em.selectedHospitalId}`}
+      <MapLibreMap
+          key={`${em.id}-${em.selectedHospitalId}-${(em.routeGeoJson as { coordinates?: unknown[] } | null)?.coordinates?.length ?? 0}`}
           originLat={em.originLat}
           originLng={em.originLng}
           liveLat={tracker.lat}
