@@ -67,8 +67,17 @@ export class EmergencyService {
     });
     if (existing) return existing;
 
-    // Rank all hospitals by routed ETA, excluding those with no beds
+    // Rank eligible hospitals: onboarded + active + beds + (DEMO_AUTO or active account)
     const hospitals = await prisma.hospital.findMany({
+      where: {
+        onboarded: true,
+        active: true,
+        availableBeds: { gt: 0 },
+        OR: [
+          { mode: "DEMO_AUTO" },
+          { users: { some: { role: "HOSPITAL_ADMIN", active: true } } },
+        ],
+      },
       select: { id: true, lat: true, lng: true, availableBeds: true },
     });
     const ranked = await this.ranking.rank(dto.originLat, dto.originLng, hospitals);
@@ -76,7 +85,7 @@ export class EmergencyService {
     if (ranked.length === 0) {
       throw new EmergencyError(
         "NO_HOSPITALS_FOUND",
-        "No hospitals with available beds found near the emergency origin"
+        "No eligible hospitals with available beds found near the emergency origin"
       );
     }
 
@@ -129,6 +138,12 @@ export class EmergencyService {
       selectedHospitalId: emergency.selectedHospitalId,
       data: { emergency },
     });
+
+    // Schedule DEMO_AUTO hospital resolution if applicable
+    if (emergency.selectedHospitalId) {
+      const { demoAutoScheduler } = await import("./instances");
+      demoAutoScheduler.schedule(emergency.id, emergency.selectedHospitalId);
+    }
 
     return emergency;
   }

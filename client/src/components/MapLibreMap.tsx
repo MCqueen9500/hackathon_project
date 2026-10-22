@@ -174,9 +174,9 @@ export function MapLibreMap({
         source: "signals",
         filter: ["==", ["get", "state"], "FORCED_GREEN"],
         paint: {
-          "circle-radius": 11,
+          "circle-radius": 18,
           "circle-color": "#4ade80",
-          "circle-opacity": 0.35,
+          "circle-opacity": 0.30,
         },
       });
       map.addLayer({
@@ -186,8 +186,8 @@ export function MapLibreMap({
         paint: {
           "circle-radius": [
             "case",
-            ["==", ["get", "state"], "FORCED_GREEN"], 7,
-            5,
+            ["==", ["get", "state"], "FORCED_GREEN"], 12,
+            9,
           ],
           "circle-color": [
             "match", ["get", "state"],
@@ -197,10 +197,44 @@ export function MapLibreMap({
             "FORCED_GREEN", "#4ade80",
             "#9ca3af",
           ],
-          "circle-stroke-width": 1.5,
-          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 2,
+          "circle-stroke-color": [
+            "match", ["get", "state"],
+            "FORCED_GREEN", "#bbf7d0",
+            "#ffffff",
+          ],
         },
       });
+
+      // Signal popup on click
+      const signalPopup = new maplibregl.Popup({
+        closeButton: true,
+        closeOnClick: false,
+        className: "egc-signal-popup",
+        maxWidth: "200px",
+      });
+      map.on("click", "signals-dots", (e) => {
+        const feat = e.features?.[0];
+        if (!feat) return;
+        const { name, state } = feat.properties as { name: string | null; state: string };
+        const coords = (feat.geometry as unknown as { coordinates: [number, number] }).coordinates;
+        const stateLabel: Record<string, string> = {
+          RED: "🔴 RED",
+          GREEN: "🟢 GREEN",
+          YELLOW: "🟡 YELLOW",
+          FORCED_GREEN: "💚 CORRIDOR GREEN",
+        };
+        signalPopup
+          .setLngLat(coords)
+          .setHTML(`<div style="font-size:12px;font-family:Inter,sans-serif;">
+            <b style="color:#f1f5f9">${name ?? "Signal"}</b><br/>
+            <span style="color:#94a3b8">${stateLabel[state] ?? state}</span>
+          </div>`)
+          .addTo(map);
+        e.preventDefault();
+      });
+      map.on("mouseenter", "signals-dots", () => { map.getCanvas().style.cursor = "pointer"; });
+      map.on("mouseleave", "signals-dots", () => { map.getCanvas().style.cursor = ""; });
 
       const originEl = document.createElement("div");
       originEl.innerHTML = ambulanceMarker ? "🚑" : "📍";
@@ -235,18 +269,20 @@ export function MapLibreMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** Update the GPS accuracy circle. Args: lng, lat (MapLibre convention) → fixed to call circleFeature(lat, lng). */
   const setAccuracyCircle = (lng: number, lat: number, radiusM: number | null) => {
     const map = mapRef.current;
     if (!map?.getSource("accuracy")) return;
     const src = map.getSource("accuracy") as maplibregl.GeoJSONSource;
     if (!showAccuracyCircle || radiusM == null || radiusM <= 0) {
-      src.setData(circleFeature(lat, lng, 1));
+      src.setData(circleFeature(lat, lng, 1)); // lat first, lng second — correct order
       map.setLayoutProperty("accuracy-fill", "visibility", "none");
       map.setLayoutProperty("accuracy-line", "visibility", "none");
       return;
     }
     map.setLayoutProperty("accuracy-fill", "visibility", "visible");
     map.setLayoutProperty("accuracy-line", "visibility", "visible");
+    // circleFeature(lat, lng, radius) — lat first, lng second
     src.setData(circleFeature(lat, lng, radiusM));
   };
 

@@ -77,12 +77,30 @@ export default function SignalsPage() {
 
     map.on("load", () => {
       map.addSource("signals", { type: "geojson", data: signalsToFC(liveRef.current) });
+
+      // Glow layer for corridor green signals
+      map.addLayer({
+        id: "signals-glow",
+        type: "circle",
+        source: "signals",
+        filter: ["==", ["get", "state"], "FORCED_GREEN"],
+        paint: {
+          "circle-radius": 20,
+          "circle-color": "#4ade80",
+          "circle-opacity": 0.28,
+        },
+      });
+
       map.addLayer({
         id: "signals-dots",
         type: "circle",
         source: "signals",
         paint: {
-          "circle-radius": 6,
+          "circle-radius": [
+            "case",
+            ["==", ["get", "state"], "FORCED_GREEN"], 12,
+            10,
+          ],
           "circle-color": [
             "match", ["get", "state"],
             "RED", "#ef4444",
@@ -92,7 +110,7 @@ export default function SignalsPage() {
             "#38bdf8",
           ],
           "circle-stroke-width": [
-            "case", ["get", "simulated"], 2.5, 1.5,
+            "case", ["get", "simulated"], 3, 2,
           ],
           "circle-stroke-color": [
             "case", ["get", "simulated"], "#facc15", "#ffffff",
@@ -101,17 +119,28 @@ export default function SignalsPage() {
       });
     });
 
+
     map.on("click", "signals-dots", (e) => {
       e.preventDefault();
       const id = e.features?.[0]?.properties?.id as string | undefined;
       if (!id) return;
       const row = liveRef.current.find((s) => s.id === id);
       if (row) selectSignal(row, map);
+      e.originalEvent.stopPropagation();
+    });
+
+    map.on("click", "signals-glow", (e) => {
+      e.preventDefault();
+      const id = e.features?.[0]?.properties?.id as string | undefined;
+      if (!id) return;
+      const row = liveRef.current.find((s) => s.id === id);
+      if (row) selectSignal(row, map);
+      e.originalEvent.stopPropagation();
     });
 
     map.on("click", (e) => {
-      if (e.defaultPrevented) return;
-      const feats = map.queryRenderedFeatures(e.point, { layers: ["signals-dots"] });
+      // Only add a signal when clicking on empty map
+      const feats = map.queryRenderedFeatures(e.point, { layers: ["signals-dots", "signals-glow"] });
       if (feats.length > 0) return;
       void addAt(e.lngLat.lat, e.lngLat.lng);
     });
@@ -192,16 +221,20 @@ export default function SignalsPage() {
 
   const selected = live.find((s) => s.id === selectedId);
   const forced = live.filter((s) => s.state === "FORCED_GREEN").length;
+  const simulated = live.filter((s) => s.simulated).length;
+  const osm = live.length - simulated;
 
   return (
     <AppShell>
       <div className="flex flex-col gap-4">
         <div>
-          <h1 className="text-xl font-bold text-white">Signals</h1>
+          <h1 className="text-xl font-bold text-white">🚦 Traffic Signals</h1>
           <p className="text-sm text-gray-400 mt-0.5">
-            {live.length} signals · {forced} corridor green · click map to add · drag yellow pin to move
+            {live.length} total · {osm} OSM · {simulated} simulated · {forced} corridor green
           </p>
+          <p className="text-xs text-gray-600 mt-1">Click empty map to add · Click existing marker to select · Drag yellow pin to move</p>
         </div>
+
 
         <div className="flex flex-col sm:flex-row gap-2">
           <select

@@ -104,9 +104,18 @@ driverRouter.get(
 
     const { lat, lng } = parsed.data;
 
+    // Eligible: onboarded + active + beds > 0 + (DEMO_AUTO or active HOSPITAL_ADMIN)
     const hospitals = await prisma.hospital.findMany({
-      where: { availableBeds: { gt: 0 } },
-      select: { id: true, name: true, lat: true, lng: true, availableBeds: true, specialties: true, city: true },
+      where: {
+        onboarded: true,
+        active: true,
+        availableBeds: { gt: 0 },
+        OR: [
+          { mode: "DEMO_AUTO" },
+          { users: { some: { role: "HOSPITAL_ADMIN", active: true } } },
+        ],
+      },
+      select: { id: true, name: true, lat: true, lng: true, availableBeds: true, specialties: true, city: true, mode: true },
     });
 
     // Use OrsRankingProvider (routed ETA, with OSRM fallback) for candidate listing
@@ -126,6 +135,7 @@ driverRouter.get(
         lng:            h.lng,
         availableBeds:  h.availableBeds,
         specialties:    h.specialties,
+        mode:           h.mode,       // "LIVE" | "DEMO_AUTO"
         distanceMeters: r.distanceMeters,
         etaSeconds:     r.etaSeconds,
       };
@@ -134,6 +144,8 @@ driverRouter.get(
     res.json({ candidates: results });
   }
 );
+
+
 
 
 // ── POST /emergencies — create emergency with photo ───────────────────────────
@@ -246,8 +258,10 @@ driverRouter.post(
   ...guardDriver,
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
+    const emergencyId = p(req.params.id);
     try {
-      const emergency = await emergencyService.arrived(p(req.params.id), authReq.user.sub);
+      const emergency = await emergencyService.arrived(emergencyId, authReq.user.sub);
+      signalController.releaseAll(emergencyId); // restore normal signal cycle
       res.json({ emergency });
     } catch (err) {
       if (err instanceof EmergencyError) {
@@ -265,8 +279,10 @@ driverRouter.post(
   ...guardDriver,
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
+    const emergencyId = p(req.params.id);
     try {
-      const emergency = await emergencyService.cancel(p(req.params.id), authReq.user.sub);
+      const emergency = await emergencyService.cancel(emergencyId, authReq.user.sub);
+      signalController.releaseAll(emergencyId); // restore normal signal cycle
       res.json({ emergency });
     } catch (err) {
       if (err instanceof EmergencyError) {

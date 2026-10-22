@@ -9,6 +9,7 @@ import { policeRouter } from "./routes/police/index";
 import { driverRouter } from "./routes/driver/index";
 import { photosRouter } from "./routes/photos/index";
 import { signalsRouter } from "./routes/signals/index";
+import { adminHospitalsRouter } from "./routes/admin/hospitals";
 
 export function createApp() {
   const app = express();
@@ -43,6 +44,7 @@ export function createApp() {
   app.use("/police", policeRouter);
   app.use("/photos", photosRouter);
   app.use("/signals", signalsRouter);
+  app.use("/admin/hospitals", adminHospitalsRouter);
 
   // Driver routes live at root (mix of /hospitals and /emergencies paths per spec 8)
   app.use("/", driverRouter);

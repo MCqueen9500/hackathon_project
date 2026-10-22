@@ -61,6 +61,11 @@ const envSchema = z.object({
   // Deviation reroute threshold
   DEVIATION_THRESHOLD_M:     z.coerce.number().positive().default(60),
   DEVIATION_CONSECUTIVE_N:   z.coerce.number().positive().default(3),
+
+  // DEMO_AUTO hospital auto-approve/reject (spec section 17.2)
+  ALLOW_DEMO_AUTO:           z.string().default("true"),
+  DEMO_AUTO_DELAY_SEC:       z.coerce.number().positive().default(5),
+  DEMO_AUTO_REJECT_RATE:     z.coerce.number().min(0).max(1).default(0),
 });
 
 const _parsed = envSchema.safeParse(process.env);

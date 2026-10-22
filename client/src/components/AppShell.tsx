@@ -8,6 +8,7 @@
  */
 
 import { type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { useSocket } from "../hooks/useSocket";
 import type { Role } from "../types/auth";
@@ -55,6 +56,17 @@ export function AppShell({ children }: AppShellProps) {
             >
               {ROLE_LABEL[role]}
             </span>
+          )}
+
+          {/* Admin Signals link */}
+          {role === "ADMIN" && (
+            <Link
+              to="/admin/signals"
+              id="nav-signals"
+              className="text-sm text-amber-400 hover:text-amber-300 transition-colors px-2 py-1 rounded-lg hover:bg-gray-800 font-semibold flex-shrink-0"
+            >
+              🚦 Signals
+            </Link>
           )}
 
           {/* Spacer */}

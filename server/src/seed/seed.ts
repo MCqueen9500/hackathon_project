@@ -62,7 +62,7 @@ async function main() {
   console.log("[seed] Starting database seed…");
 
   // ── Load Overpass data ───────────────────────────────────────────────────────
-  const rawHospitals = loadJson<{ name: string; lat: number; lng: number }>("hospitals.json");
+  const rawHospitals = loadJson<{ osmId?: number | string; name: string; lat: number; lng: number }>("hospitals.json");
   const rawSignals   = loadJson<{ osmId?: number | string; lat: number; lng: number; name: string | null }>("signals.json");
 
   if (rawHospitals.length > 0) {
@@ -96,6 +96,7 @@ async function main() {
   const hospitalsToCreate = Array.from({ length: 5 }, (_, i) => {
     const src = rawHospitals[i] ?? FALLBACK_HOSPITALS[i];
     const beds = Math.floor(Math.random() * 7) + 2; // 2–8 beds
+    const osmId = "osmId" in src && src.osmId != null ? String(src.osmId) : null;
     return {
       name: src.name,
       lat: src.lat,
@@ -107,6 +108,9 @@ async function main() {
       ],
       totalEmergencyBeds: beds,
       availableBeds: beds,
+      onboarded: true,         // seed hospitals are pre-onboarded
+      mode: "DEMO_AUTO",       // auto-approve for demo convenience
+      osmId,
     };
   });
 

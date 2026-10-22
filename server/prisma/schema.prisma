@@ -100,6 +100,11 @@ model Hospital {
   specialties          String[] // e.g. ["TRAUMA", "CARDIAC", "PEDIATRIC"]
   totalEmergencyBeds   Int      @default(0)
   availableBeds        Int      @default(0)
+  // Onboarding & eligibility
+  onboarded            Boolean  @default(false) // false = imported OSM only, not yet activated
+  active               Boolean  @default(true)  // false = deactivated (excluded from dispatch)
+  mode                 String   @default("LIVE") // "LIVE" or "DEMO_AUTO"
+  osmId                String?  @unique          // Overpass element ID for deduplication
   createdAt            DateTime @default(now())
 
   users      User[]
